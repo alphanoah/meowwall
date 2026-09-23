@@ -669,6 +669,57 @@ function autoGrid(n) {
   return best || fallback;
 }
 
+/* ---------- 完整格（主体格）与建议值 ----------
+   「几 × 几 铺满」的格子先铺满整个矩形画布、再被猫头轮廓裁形，
+   被裁到只剩一部分的只能算「边缘格」。
+   下表为实测值：每档列数下被猫头完整覆盖（覆盖率 ≥95%）的格子数，
+   用轮廓路径 isPointInPath 逐格 9×9 采样测得，与屏幕人工清点一致
+   （如 8×8=20：第 3~6 列 × 第 3~7 行；10×9=34，与用户截图清点相同）。 */
+const MAIN_CELLS = [9, 10, 13, 20, 28, 34, 41, 48, 61, 72, 89, 98, 114, 128, 146, 156, 169, 188]; // 5~22 列
+
+const mainCellsOf = (cols) =>
+  MAIN_CELLS[Math.max(0, Math.min(MAIN_CELLS.length - 1, Math.round(cols) - 5))] || 0;
+
+const gridRowsOf = (cols) => Math.ceil(VH / (VW / cols));
+
+// 建议列数 = 「完整格数 ≥ 照片数」的最小列数（格子能多大就多大）；
+// 照片多于 188 张（22×21 的完整格上限）时只能返回上限 22
+function suggestCols(n) {
+  for (let c = 5; c <= 22; c++) if (MAIN_CELLS[c - 5] >= n) return c;
+  return 22;
+}
+
+// 滑块旁的建议提示：只提示不强制，点按钮才应用
+function renderSuggest(n, cols) {
+  const el = $('suggestHint');
+  const btn = $('suggestApply');
+  if (layoutMode !== 'grid' || !n) { el.hidden = true; return; }
+  const curMain = mainCellsOf(cols);
+  const sug = suggestCols(n);
+  if (sug === cols) { el.hidden = true; return; }   // 当前档位已是最优
+  const sugRows = gridRowsOf(sug);
+  const sugMain = mainCellsOf(sug);
+  el.hidden = false;
+  if (curMain < n) {
+    // 完整格不够：要么给建议，要么已到上限
+    if (sugMain < n) {
+      btn.hidden = true;
+      $('suggestTxt').textContent =
+        `当前 ${cols} × ${gridRowsOf(cols)} 只有 ${curMain} 个完整格，放不下 ${n} 张；已到上限 22 × 21（${sugMain} 个完整格），多出的只能进边缘`;
+    } else {
+      btn.hidden = false;
+      $('suggestTxt').textContent =
+        `当前 ${cols} × ${gridRowsOf(cols)} 只有 ${curMain} 个完整格，放不下 ${n} 张`;
+      btn.textContent = `用建议值 ${sug} × ${sugRows}（${sugMain} 个完整格）`;
+    }
+  } else {
+    // 完整格够但列数偏多：用更少的列格子更大
+    btn.hidden = false;
+    $('suggestTxt').textContent = `${n} 张照片用更少的列就能全部完整展示，每格更大`;
+    btn.textContent = `用建议值 ${sug} × ${sugRows}（${sugMain} 个完整格）`;
+  }
+}
+
 function renderMosaic(report) {
   const gap = Number($('gap').value);
   const showWhiskers = $('whiskers').checked;
@@ -690,7 +741,8 @@ function renderMosaic(report) {
   } else if (layoutMode === 'grid') {
     rects = gridRects(cols, gridRows);
     const repeat = Math.max(1, Math.round(rects.length / n));
-    note = `几 × 几 铺满：${cols} × ${gridRows} = ${rects.length} 格，${n} 张照片循环填充（每张约出现 ${repeat} 次）`;
+    const main = mainCellsOf(cols);
+    note = `几 × 几 铺满：${cols} × ${gridRows} = ${rects.length} 格，其中 ${main} 格在猫头主体内完整展示；${n} 张照片循环填充（每张约出现 ${repeat} 次）`;
     tagText = `${n} 张照片 · ${cols} × ${gridRows}`;
   } else if (n === 1) {
     rects = sliceRects(1);
@@ -708,6 +760,7 @@ function renderMosaic(report) {
   }
   $('layoutNote').textContent = note;
   $('mosaicTag').textContent = tagText;
+  renderSuggest(n, cols);
 
   // ---- 绘制 ----
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1420,6 +1473,13 @@ dz.addEventListener('drop', (e) => {
 dz.addEventListener('click', (e) => { if (!e.target.closest('button')) $('fileInput').click(); });
 
 ['density', 'gap'].forEach((id) => $(id).addEventListener('input', () => renderMosaic(true)));
+$('suggestApply').addEventListener('click', () => {
+  const n = photos.filter((p) => p._bitmap).length;
+  if (!n) return;
+  $('density').value = suggestCols(n);
+  renderMosaic(true);
+  toast('已切到建议档位');
+});
 $('whiskers').addEventListener('change', () => renderMosaic());
 $('shuffle').addEventListener('click', () => { seed = Math.floor(Math.random() * 1e6); renderMosaic(true); });
 $('download').addEventListener('click', download);
