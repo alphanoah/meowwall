@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>猫咪头像墙 · 上门喂猫拍照记录</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">
+      <svg viewBox="0 0 1000 900">
+        <path d="M500 872 C356 872 176 748 172 572 C169 498 190 418 208 352 L148 92 C143 74 158 58 176 66 L372 158 C414 140 456 131 500 131 C544 131 586 140 628 158 L824 66 C842 58 857 74 852 92 L792 352 C810 418 831 498 828 572 C824 748 644 872 500 872 Z"/>
+      </svg>
+    </span>
+    <div class="brand-txt">
+      <h1>猫咪头像墙</h1>
+      <p>上门喂猫 · 每一次探访，都留下一个小猫头</p>
+    </div>
+  </div>
+  <div class="stats" id="stats">
+    <div class="stat"><b id="statPhotos">0</b><span>张照片</span></div>
+    <div class="stat"><b id="statCats">0</b><span>只猫咪</span></div>
+    <div class="stat"><b id="statClients">0</b><span>位客户</span></div>
+    <div class="stat"><b id="statLast">—</b><span>最近探访</span></div>
+  </div>
+</header>
+
+<div class="demo-bar" id="demoBar">
+  <span class="demo-dot" aria-hidden="true"></span>
+  <span class="demo-txt"><b>示例模式</b> · 当前显示的是程序画出来的示例照片，<u>不会保存</u>，也不会动到你的真实照片</span>
+  <button class="btn-soft" id="demoExit">退出示例</button>
+</div>
+
+<main class="layout">
+
+  <!-- 左：上传 + 记录列表 -->
+  <section class="panel panel-left">
+    <div class="panel-head">
+      <h2>探访照片</h2>
+      <div class="head-btns">
+        <button class="btn-ghost" id="exportBtn" title="把全部照片和记录打包成一个文件">导出备份</button>
+        <button class="btn-ghost" id="importBtn" title="从备份文件恢复照片和记录">导入恢复</button>
+        <button class="btn-ghost" id="clearAll">清空全部</button>
+      </div>
+    </div>
+
+    <div class="dropzone" id="dropzone">
+      <div class="dz-icon">
+        <svg viewBox="0 0 1000 900">
+          <path d="M500 872 C356 872 176 748 172 572 C169 498 190 418 208 352 L148 92 C143 74 158 58 176 66 L372 158 C414 140 456 131 500 131 C544 131 586 140 628 158 L824 66 C842 58 857 74 852 92 L792 352 C810 418 831 498 828 572 C824 748 644 872 500 872 Z"/>
+        </svg>
+      </div>
+      <p class="dz-title">把拍到的猫猫拖进来</p>
+      <p class="dz-hint">或点击下方按钮选择 / 现场拍照，支持一次多张</p>
+      <p class="dz-rule">文件名写成 <b>客户id-猫咪名称-地址</b>（地址可省略）会自动填好<br>
+        如 <b>8-波波.png</b> → 波波(8)　<b>8-all.JPG</b> → 合照(8)</p>
+      <div class="dz-btns">
+        <button class="btn-primary" id="pickBtn">选择照片</button>
+        <button class="btn-soft" id="cameraBtn">拍 照</button>
+      </div>
+      <button class="btn-ghost" id="demoBtn">看看示例效果 →</button>
+    </div>
+
+    <input type="file" id="fileInput" accept="image/*" multiple hidden>
+    <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
+    <input type="file" id="importInput" accept=".json,application/json" hidden>
+
+    <div class="list-head">
+      <span>照片记录</span>
+      <span class="tag" id="listCount">0</span>
+    </div>
+    <div class="photo-list" id="photoList"></div>
+    <p class="list-empty" id="listEmpty">还没有照片，先上传一张喵～</p>
+  </section>
+
+  <!-- 右：大猫头拼贴 -->
+  <section class="panel panel-right">
+    <div class="panel-head">
+      <h2>大猫咪头 · 照片拼贴</h2>
+      <span class="tag" id="mosaicTag">—</span>
+    </div>
+
+    <div class="stage" id="stage">
+      <canvas id="mosaic" width="1400" height="1260"></canvas>
+    </div>
+
+    <div class="controls">
+      <div class="ctl seg">
+        <span>排列方式</span>
+        <div class="seg-btns" id="modeSeg">
+          <button type="button" data-mode="auto" class="on">按照片数均分</button>
+          <button type="button" data-mode="grid">几 × 几 铺满</button>
+        </div>
+      </div>
+      <label class="ctl" id="densityCtl">
+        <span>照片块数<em id="densityVal">10 × 9</em></span>
+        <input type="range" id="density" min="5" max="22" value="10">
+      </label>
+      <label class="ctl">
+        <span>间隙<em id="gapVal">3</em></span>
+        <input type="range" id="gap" min="0" max="12" value="3">
+      </label>
+      <label class="ctl switch">
+        <input type="checkbox" id="whiskers" checked>
+        <span>轮廓 + 胡须</span>
+      </label>
+    </div>
+
+    <p class="layout-note" id="layoutNote">上传照片后，会按张数自动均分猫头</p>
+
+    <div class="actions">
+      <button class="btn-primary" id="shuffle">重新排列</button>
+      <button class="btn-soft" id="download">下载这张拼图</button>
+    </div>
+
+    <p class="tip" id="tip">提示：默认按张数均分；照片多的时候可以切到「几 × 几 铺满」，做成密集的照片墙。</p>
+  </section>
+
+</main>
+
+<div class="toast" id="toast"></div>
+<div class="lightbox" id="lightbox"><img alt="预览" id="lightboxImg"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
