@@ -62,9 +62,9 @@ function runChecks(win, doc) {
           '包内 3 张原图 + manifest.json', names.join(','));
       const mf = JSON.parse(new TextDecoder().decode(entries.get('manifest.json')));
       chk(mf.type === 'backup' && mf.version === 2 && mf.photos.length === 3, 'manifest 类型/版本/数量');
-      const mimi = mf.photos.find((p) => p.name === '咪咪(90)');
+      const mimi = mf.photos.find((p) => p.name === '咪咪');
       chk(!!mimi && mimi.pid === '90' && mimi.place === 'A楼302' && mimi.file === `photos/${mimi.id}.jpg`,
-          'manifest 带 pid/地址/文件映射', JSON.stringify(mimi));
+          'manifest 带 pid/地址/文件映射（名字为纯名）', JSON.stringify(mimi));
       chk(entries.get(mimi.file).length > 1000, '原图是二进制 JPEG（非 base64 文本）');
 
       // 3) 导入恢复（同 id 覆盖，往返后数据应一致）
@@ -80,9 +80,10 @@ function runChecks(win, doc) {
       const groups = [...doc.querySelectorAll('.group-card')];
       chk(groups.length === 2, '恢复后仍是 2 组', groups.length);
       const namesAll = [...doc.querySelectorAll('.card .f-name')].map((i) => i.value).sort().join('/');
-      chk(namesAll === '合照(90)/咪咪(90)/波波(91)', '恢复后名字/分组不变', namesAll);
-      const place90 = doc.querySelector('.group-card [data-gk="place"]').value;
-      chk(place90 === 'A楼302', '恢复后组头地址保留', place90);
+      chk(namesAll === '合照/咪咪/波波', '恢复后名字（纯名）/分组不变', namesAll);
+      const g90 = [...doc.querySelectorAll('.group-card')].find((g) => g.querySelector('.f-pid')?.value === '90');
+      const place90 = g90 ? g90.querySelector('[data-gk="place"]').value : '';
+      chk(place90 === 'A楼302', '恢复后组头地址保留（按 pid 找组）', place90);
       const tag = doc.getElementById('mosaicTag').textContent;
       chk(tag.includes('3 张照片'), '拼贴墙正常渲染', tag);
 

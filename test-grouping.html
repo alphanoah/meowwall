@@ -12,7 +12,7 @@
 </style>
 </head>
 <body>
-<h2>pid 分组 自测</h2>
+<h2>pid 分组 自测（纯名字 + pid · 编号降序）</h2>
 <div id="status">等待 iframe 就绪…</div>
 <pre id="out"></pre>
 <iframe id="app" src="/index.html"></iframe>
@@ -52,44 +52,87 @@ function runChecks(win, doc) {
   const q = (sel, root) => (root || doc).querySelector(sel);
   const qa = (sel, root) => [...(root || doc).querySelectorAll(sel)];
 
-  const groups = qa('.group-card');
-  chk(groups.length === 3, '5 张照片分成 3 组（90 / 91 / 未命名）', groups.length);
+  // 文件名解析：非数字开头不自动填
+  chk(win.parseFileName('小白-英短-花园.jpg') === null, '中文开头的文件名不自动填');
+  const parsed = win.parseFileName('90-咪咪-A楼302.jpg');
+  chk(!!parsed && parsed.name === '咪咪' && parsed.pid === '90' && parsed.place === 'A楼302',
+      '数字开头解析为 纯名+pid+地址', JSON.stringify(parsed));
+  chk(win.parseFileName('90-all.jpg').name === '合照', 'all → 合照（纯名）');
 
-  const g90 = groups[0], g91 = groups[1], gAnon = groups[2];
-  chk(q('.f-pid', g90).value === '90' && q('.f-pid', g91).value === '91', '组顺序 90 → 91', qa('.f-pid').map(i => i.value).join(','));
+  // 旧数据迁移：名字括号里的编号拆进 pid（「奶牛(大)」这种非编号括号不动）
+  const mig1 = { name: '咪咪(1)', pid: '' };
+  win.stripNameSuffix(mig1);
+  chk(mig1.name === '咪咪' && mig1.pid === '1', '迁移：咪咪(1) → 纯名+pid', JSON.stringify(mig1));
+  const mig2 = { name: '合照(2)', pid: '' };
+  win.stripNameSuffix(mig2);
+  chk(mig2.name === '合照' && mig2.pid === '2', '迁移：合照(2) → 合照+pid', JSON.stringify(mig2));
+  const mig3 = { name: '奶牛(大)', pid: '' };
+  win.stripNameSuffix(mig3);
+  chk(mig3.name === '奶牛(大)' && !mig3.pid, '迁移：非编号括号原样保留', JSON.stringify(mig3));
+
+  const groups = qa('.group-card');
+  chk(groups.length === 3, '5 张照片分成 3 组', groups.length);
+
+  // 编号从大到小：91 在前，90 在后，未编号最后
+  const g91 = groups[0], g90 = groups[1], gAnon = groups[2];
+  chk(q('.f-pid', g91).value === '91' && q('.f-pid', g90).value === '90',
+      '默认编号从大到小 91 → 90', qa('.f-pid').map(i => i.value).join(','));
   chk(q('.f-pid', gAnon).value === '', '未命名照片单独一组、编号为空');
 
   const names90 = qa('.card .f-name', g90).map(i => i.value);
   chk(names90.length === 3 &&
-      names90[0] === '奶牛(90)' && names90[1] === '咪咪(90)' && names90[2] === '合照(90)',
-      '组内 3 只、合照排最后、新照片在前', names90.join(' / '));
+      names90[0] === '奶牛' && names90[1] === '咪咪' && names90[2] === '合照',
+      '名字存纯名（不带括号）、合照排最后、新照片在前', names90.join(' / '));
 
   chk(q('[data-gk="place"]', g90).value === 'A楼302', '组头地址取自文件名', q('[data-gk="place"]', g90).value);
   chk(/^\d{4}-\d{2}-\d{2}$/.test(q('[data-gk="date"]', g90).value), '组头日期默认今天');
 
-  chk(qa('.card .f-name', g91).length === 1 && q('.card .f-name', g91).value === '波波(91)', '订单 91 一张');
+  chk(qa('.card .f-name', g91).length === 1 && q('.card .f-name', g91).value === '波波', '订单 91 一张（纯名）');
 
-  // 组头改地址 → 整组生效（改完重新渲染，值还在）
+  // 统计：4 猫咪（奶牛/咪咪/合照不算/波波）+ 3 客户（90/91/无编号算1）
+  chk(q('#statCats').textContent === '4', '统计：4 只猫咪', q('#statCats').textContent);
+  chk(q('#statClients').textContent === '3', '统计：3 位客户', q('#statClients').textContent);
+
+  // 组头改地址 → 整组生效
   setVal(q('[data-gk="place"]', g90), 'C栋501');
   chk(q('[data-gk="place"]', g90).value === 'C栋501', '组头改地址整组生效');
 
-  // 组头改 pid → 名字括号联动 + 重新归组
+  // 组头改 pid → 重新归组；名字保持纯名不受影响。编号 8 < 91，按数字降序排在 91 之后
   setVal(q('.f-pid', g90), '8');
-  const groups2 = qa('.group-card');
-  chk(groups2.length === 3 && q('.f-pid', groups2[0]).value === '8', '改 pid 后重新归组、排最前', qa('.f-pid').map(i => i.value).join(','));
-  const names8 = qa('.card .f-name', groups2[0]).map(i => i.value);
-  chk(names8.join('/') === '奶牛(8)/咪咪(8)/合照(8)', 'pid 同步到组内名字括号', names8.join('/'));
-  chk(q('[data-gk="place"]', groups2[0]).value === 'C栋501', '归组后地址保留');
+  let gs = qa('.group-card');
+  chk(gs.length === 3 && q('.f-pid', gs[1]).value === '8', '改 pid 后重新归组、按数字降序 91→8', qa('.f-pid').map(i => i.value).join(','));
+  const names8 = qa('.card .f-name', gs[1]).map(i => i.value);
+  chk(names8.join('/') === '奶牛/咪咪/合照', '改 pid 后名字保持纯名不变', names8.join('/'));
+  chk(q('[data-gk="place"]', gs[1]).value === 'C栋501', '归组后地址保留');
 
-  // 给未命名照片补编号 → 归组
-  setVal(q('.f-pid', groups2[2]), '8');
-  const groups3 = qa('.group-card');
-  chk(groups3.length === 2 && q('.f-pid', groups3[0]).value === '8' && qa('.card', groups3[0]).length === 4,
-      '未命名照片补编号 8 后并入该组', groups3.length + ' 组 / 首组 ' + qa('.card', groups3[0]).length + ' 张');
+  // 编号框输入混入非数字 → 只留数字（每次重渲染后都要重新查询节点）
+  const pidBox = qa('.f-pid')[0];
+  setVal(pidBox, '9a1b');
+  chk(qa('.f-pid')[0].value === '91', '编号框剔除非数字字符', qa('.f-pid')[0].value);
 
-  // 改名字括号 → pid 联动（改「波波(91)」为「波波(7)」→ 并入 7？这里只验证 8 组改名不受影响）
-  const noteInput = q('.card .f-note', groups3[0]);
-  chk(!!noteInput, '组内仍有备注输入框');
+  // 给未命名照片补编号 8 → 并入 8 组（仍是 3 组：91 / 8 / 无）
+  setVal(qa('.f-pid')[2], '8');
+  gs = qa('.group-card');
+  chk(gs.length === 2 && q('.f-pid', gs[0]).value === '91' && q('.f-pid', gs[1]).value === '8' && qa('.card', gs[1]).length === 4,
+      '未命名照片补编号 8 后并入该组', gs.length + ' 组 / pids ' + qa('.f-pid').map(i => i.value).join(',') + ' / 首组 ' + qa('.card', gs[0]).length + ' 张');
+
+  // 改组内名字 → 不再影响 pid
+  const nameInput = qa('.card .f-name', gs[1])[0];
+  nameInput.value = '奶牛(大)';
+  nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+  nameInput.dispatchEvent(new Event('change', { bubbles: true }));
+  chk(qa('.card .f-name', gs[1])[0].value === '奶牛(大)' && q('.f-pid', gs[1]).value === '8',
+      '名字带括号不再联动编号', qa('.card .f-name', gs[1]).map((i) => i.value).join('/'));
+
+  // 排序切换：按日期（改 91 组日期更早 → 编号序 8 最前；日期序 8 组仍是最新）
+  const sortBtn = doc.getElementById('sortBtn');
+  chk(!!sortBtn && sortBtn.textContent.includes('编号'), '排序按钮存在且显示编号序', sortBtn && sortBtn.textContent);
+  sortBtn.click();
+  chk(sortBtn.textContent.includes('日期'), '切换到日期序', sortBtn.textContent);
+  const groupsByDate = qa('.group-card');
+  chk(q('.f-pid', groupsByDate[0]).value === '8', '日期序：今天日期的组在前', qa('.f-pid').map(i => i.value).join(','));
+  sortBtn.click();
+  chk(sortBtn.textContent.includes('编号'), '切回编号序', sortBtn.textContent);
 
   // 收尾：关掉上传后自动弹出的裁剪队列，方便截图看列表
   const keepBtn = [...doc.querySelectorAll('button')].find((b) => b.textContent.includes('全部保持原样'));

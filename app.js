@@ -66,6 +66,19 @@ const pidOf = (p) => {
   return v || idOf(p.name);
 };
 
+/* 纯名字迁移：把旧数据「咪咪(1)」拆成 名字=咪咪 + pid=1（括号里是编号才拆，
+   「奶牛(大)」这种不是编号的括号原样保留）。加载和导入时都会跑一遍。 */
+function stripNameSuffix(p) {
+  const name = String(p.name || '').trim();
+  const m = name.match(/^(.*?)\s*[（(]([^()（）]+)[)）]\s*$/);
+  if (!m || !m[1]) return;
+  const inner = m[2].trim();
+  const pid = String(p.pid ?? '').trim();
+  if (!/^\d+$/.test(inner) && inner !== pid) return;   // 不是编号 → 不动
+  if (!pid) p.pid = inner;
+  p.name = m[1].trim();
+}
+
 let toastTimer;
 function toast(msg) {
   const t = $('toast');
@@ -306,19 +319,16 @@ function parseFileName(fileName) {
   const base = String(fileName || '').replace(/\.[^.]+$/, '').trim();
   if (!base) return null;
   const parts = base.split('-').map((s) => s.trim());
-  if (parts.length === 1) {
-    // 只有纯数字文件名时，视为只给了客户 id
-    return /^\d+$/.test(parts[0]) ? { name: `猫咪(${parts[0]})`, place: '' } : null;
-  }
+  // 只有「数字-猫名-地址」格式才自动填；第一段不是纯数字（比如中文猫名开头）一律不自动填，手动补
+  if (!/^\d+$/.test(parts[0])) return null;
   const id = parts[0];
-  if (!id) return null;
   const catRaw = parts[1] || '';
   const place = parts.slice(2).filter(Boolean).join('-');
   let name;
-  if (/^all$/i.test(catRaw)) name = `合照(${id})`;     // all = 所有猫的合照
-  else if (catRaw) name = `${catRaw}(${id})`;
-  else name = `猫咪(${id})`;
-  return { name, place };
+  if (/^all$/i.test(catRaw)) name = '合照';        // all = 所有猫的合照
+  else if (catRaw) name = catRaw;
+  else name = '猫咪';
+  return { name, pid: id, place };
 }
 
 async function fileToRecord(file) {
@@ -343,7 +353,7 @@ async function fileToRecord(file) {
   const parsed = parseFileName(file.name);
   if (parsed) {
     rec.name = parsed.name;
-    rec.pid = idOf(parsed.name);          // 客户 id 同时存进 pid，供分组用
+    rec.pid = parsed.pid || '';           // 编号只存 pid，名字里不再带 (id)
     if (parsed.place) rec.place = parsed.place;
     rec._autoFilled = true;
   }
@@ -468,7 +478,7 @@ function buildDemoPhotos() {
       w: c.width, h: c.height, createdAt: Date.now() - i,
       _bitmap: c, _thumbUrl: c.toDataURL('image/jpeg', 0.72)
     };
-  });
+  }).map((rec) => { stripNameSuffix(rec); return rec; });   // 名字统一存纯名，编号进 pid
 }
 
 // 进入示例模式：把真实照片在内存里拍个快照，退出时原样恢复
@@ -513,9 +523,33 @@ function leaveDemoForReal() {
 function catNameOf(p) { return (p.name || '').trim() || '未命名猫咪'; }
 
 /* 分组：pid 相同的照片归为一户（订单/家庭）。
-   · 没有编号的照片各自独立一组（组头可补填编号归组），排在最后
+   · 没有编号的照片各自独立一组（组头可补填编号归组）
    · 组内合照排最后，其余保持现有顺序（新照片在前）
-   · 组间按编号排（数字优先），没编号的按创建时间新在前 */
+   · 组间排序见 sortGroups（默认编号从大到小，可切日期序） */
+/* 组间排序，两种模式（记忆在 localStorage）：
+   · pid-desc（默认）：编号从大到小（编号最大的订单 = 最新，排最前）；没编号的排最后
+   · date：按组内最近的探访日期从新到旧 */
+function sortGroups(list) {
+  const mode = localStorage.getItem('catsmap.sort') || 'pid-desc';
+  if (mode === 'date') {
+    const gkey = (g) => {
+      let d = ''; let t = 0;
+      for (const m of g.members) {
+        if ((m.date || '') > d) d = m.date || '';
+        t = Math.max(t, m.createdAt || 0);
+      }
+      return `${d}|${String(t).padStart(15, '0')}`;
+    };
+    list.sort((a, b) => (gkey(a) < gkey(b) ? 1 : gkey(a) > gkey(b) ? -1 : 0));
+  } else {
+    list.sort((a, b) => {
+      if (a.pid && b.pid) return b.pid.localeCompare(a.pid, undefined, { numeric: true });
+      if (a.pid !== b.pid) return a.pid ? -1 : 1;
+      return (b.members[0].createdAt || 0) - (a.members[0].createdAt || 0);
+    });
+  }
+}
+
 function groupPhotos() {
   const map = new Map();
   for (const p of photos) {
@@ -528,11 +562,7 @@ function groupPhotos() {
   for (const g of list) {
     g.members.sort((a, b) => (isGroupName(a.name) ? 1 : 0) - (isGroupName(b.name) ? 1 : 0)); // 稳定排序，合照挪到最后
   }
-  list.sort((a, b) => {
-    if (a.pid && b.pid) return a.pid.localeCompare(b.pid, undefined, { numeric: true });
-    if (a.pid !== b.pid) return a.pid ? -1 : 1;
-    return (b.members[0].createdAt || 0) - (a.members[0].createdAt || 0);
-  });
+  sortGroups(list);
   return list;
 }
 
@@ -541,6 +571,8 @@ function renderList() {
   box.innerHTML = '';
   $('listEmpty').style.display = photos.length ? 'none' : 'block';
   $('listCount').textContent = photos.length;
+  const sb = $('sortBtn');
+  if (sb) sb.textContent = (localStorage.getItem('catsmap.sort') || 'pid-desc') === 'date' ? '按日期 ↓' : '按编号 ↓';
 
   for (const g of groupPhotos()) {
     const sec = document.createElement('section');
@@ -552,7 +584,7 @@ function renderList() {
     head.className = 'group-head';
     head.innerHTML = `
       <span class="pid-label">订单</span>
-      <input class="f-pid" data-gk="pid" placeholder="补编号" title="订单/家庭编号，一户共用；改了会同步到组内名字" value="${escapeAttr(g.pid)}">
+      <input class="f-pid" data-gk="pid" inputmode="numeric" placeholder="补编号" title="订单/家庭编号，只填数字，一户共用" value="${escapeAttr(g.pid)}">
       <input type="date" data-gk="date" title="探访日期（整组共用）" value="${escapeAttr(dateVal)}">
       <input data-gk="place" placeholder="地址 / 楼栋（整组共用）" title="地址（整组共用）" value="${escapeAttr(placeVal)}">`;
     sec.appendChild(head);
@@ -588,27 +620,27 @@ function escapeAttr(s) {
     .replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/* 统计口径：
+/* 统计口径（编号一律看 pid 字段，名字里不再带编号）：
    · 照片   = 总张数
-   · 猫咪   = 去重后的猫咪名（「合照(8)」这种合影不算猫）；
+   · 猫咪   = 同一户内的猫咪名去重（不同户的同名猫算两只）；合照不算猫；
               完全没填名字的照片整体算作 1 只「未命名猫」
-   · 客户   = 名字末尾编号去重（8 → 一位客户）；没有编号的照片单独计：
+   · 客户   = pid 去重（一户一位）；没有编号的照片单独计：
               每张未命名照片算一位，有名字但没编号的合起来算一位
    改了名字或编号后，这里会跟着重新统计。 */
 function renderStats() {
   $('statPhotos').textContent = photos.length;
 
-  const catKeys = new Set();   // 猫咪去重键（用完整名字，避免不同客户的同名猫混在一起）
-  const clientIds = new Set(); // 有编号的客户
+  const catKeys = new Set();   // 猫咪去重键 = 户编号 + 名字（避免不同客户同名猫混在一起）
+  const clientIds = new Set(); // 有编号的客户（pid 去重）
   let unnamed = 0;             // 完全没填名字的照片
   let namedNoId = 0;           // 有名字但没有编号的照片
 
   photos.forEach((p) => {
     const name = (p.name || '').trim();
+    const pid = String(p.pid ?? '').trim() || idOf(name);   // 旧内存数据兜底
     if (!name) { unnamed++; return; }
-    const id = idOf(name);
-    if (id) clientIds.add(id); else namedNoId++;
-    if (!isGroupName(name)) catKeys.add(name);
+    if (pid) clientIds.add(pid); else namedNoId++;
+    if (!isGroupName(name)) catKeys.add((pid || '#') + '|' + name);
   });
 
   $('statCats').textContent = catKeys.size + (unnamed ? 1 : 0);
@@ -623,6 +655,12 @@ function renderStats() {
    · 组头：pid / 日期 / 地址（change 时整组生效，改 pid 会重新归组） */
 let saveTimers = {};
 $('photoList').addEventListener('input', (e) => {
+  const pidInput = e.target.closest('.f-pid');
+  if (pidInput) {                              // 编号框：输入时实时剔除非数字
+    const v = pidInput.value.replace(/\D/g, '');
+    if (v !== pidInput.value) pidInput.value = v;
+    return;
+  }
   const input = e.target.closest('input[data-k]');
   if (!input) return;                          // 组头字段走 change
   const card = input.closest('.card');
@@ -632,8 +670,7 @@ $('photoList').addEventListener('input', (e) => {
   if (input.dataset.k === 'name') {
     const img = card.querySelector('.thumb img');
     if (img) img.alt = catNameOf(rec);
-    const id = idOf(rec.name);
-    if (id) rec.pid = id;                      // 双向同步：名字括号 → pid
+    // 名字只存纯名字；编号统一在组头维护，不再从名字括号里提取
   }
   clearTimeout(saveTimers[rec.id]);
   saveTimers[rec.id] = setTimeout(() => { saveRecord(rec); renderStats(); }, 420);
@@ -656,17 +693,9 @@ $('photoList').addEventListener('change', (e) => {
   const k = gInput.dataset.gk;
 
   if (k === 'pid') {
-    const v = gInput.value.trim();
-    for (const rec of members) {
-      rec.pid = v;
-      const name = (rec.name || '').trim();
-      if (name && v) {
-        // 双向同步：pid → 名字括号（有括号就替换，没括号就补上）
-        rec.name = idOf(name)
-          ? name.replace(/[（(]\s*[^()（）]*?[)）]\s*$/, `(${v})`)
-          : `${name}(${v})`;
-      }
-    }
+    const v = gInput.value.trim().replace(/\D/g, '');   // 编号只留数字
+    gInput.value = v;
+    for (const rec of members) rec.pid = v;             // 名字保持纯名，编号只进 pid
     renderList();                              // 重新归组排序
   } else {
     for (const rec of members) rec[k] = gInput.value;   // 日期/地址整组共用
@@ -1064,9 +1093,9 @@ async function blobBytes(b) { return new Uint8Array(await b.arrayBuffer()); }
 // —— 照片文件名：客户id-猫咪名（有 id 不会重名）；没名字/id 的给随机 ID ——
 function photoFileBase(rec) {
   const name = (rec.name || '').trim();
-  const id = idOf(name).replace(/[\\/:*?"<>|]/g, '');
-  const base = name.replace(/\s*[（(][^()（）]*[)）]\s*$/, '').trim()
-    .replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ');
+  const id = String(rec.pid ?? '').trim().replace(/[\\/:*?"<>|]/g, '');
+  const base = name.replace(/\s+/g, ' ')
+    .replace(/[\\/:*?"<>|]/g, '');
   if (id && base) return `${id}-${base}`;
   if (id) return id;
   if (base) return base;
@@ -1136,8 +1165,7 @@ async function exportZip() {
       manifest.photos.push({
         file: fname,
         name: (rec.name || '').trim(),
-        id: idOf(rec.name || ''),
-        pid: pidOf(rec),
+        id: pidOf(rec),
         date: rec.date || '',
         place: rec.place || '',
         note: rec.note || '',
@@ -1231,7 +1259,7 @@ async function buildBackupBlob() {
 async function exportBackup() {
   toast('正在打包备份…');
   const built = await buildBackupBlob();
-  if (!built) return toast('还没有照片可以备份');
+  if (!built) return toast('没有可备份的真实照片（示例照片不会备份；如果刚清空过，请先导入备份或重新上传）');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(built.blob);
   a.download = `猫咪头像墙备份-${todayISO()}.zip`;
@@ -1303,6 +1331,7 @@ async function importBackup(file) {
         blob, thumb, w: it.w || 0, h: it.h || 0, createdAt: it.createdAt || Date.now(),
         crop: it.crop || null
       };
+      stripNameSuffix(rec);                    // 旧备份名字可能带 (id)，拆成纯名 + pid
       rec._bitmap = await decodeFile(rec.blob);
       rec._thumbUrl = URL.createObjectURL(thumb);
       prepareSrc(rec);
@@ -1348,6 +1377,7 @@ async function importBackupZip(file) {
         w: it.w || 0, h: it.h || 0, createdAt: it.createdAt || Date.now(),
         crop: it.crop || null
       };
+      stripNameSuffix(rec);                    // manifest 里的旧名字可能带 (id)，拆成纯名 + pid
       rec._bitmap = await decodeFile(blob);
       const thumb = (await resizeToBlob(rec._bitmap, THUMB_SIZE, 0.78)).blob;
       rec._thumbUrl = URL.createObjectURL(thumb);
@@ -1619,6 +1649,11 @@ $('cameraBtn').addEventListener('click', () => $('cameraInput').click());
 $('demoBtn').addEventListener('click', () => enterDemo(14));
 $('demoExit').addEventListener('click', exitDemo);
 $('exportBtn').addEventListener('click', exportBackup);
+$('sortBtn').addEventListener('click', () => {
+  const next = (localStorage.getItem('catsmap.sort') || 'pid-desc') === 'date' ? 'pid-desc' : 'date';
+  localStorage.setItem('catsmap.sort', next);
+  renderList();
+});
 $('zipBtn').addEventListener('click', exportZip);
 $('importBtn').addEventListener('click', () => $('importInput').click());
 $('importInput').addEventListener('change', (e) => {
@@ -1767,13 +1802,8 @@ $('clearAll').addEventListener('click', async () => {
       loaded.push(r);
     }
     if (demoActive) { demoSnapshot = loaded; return; }  // 加载期间用户进了示例，先存快照，退出时再显示
-    // 旧数据迁移：没有 pid 字段的，从名字括号补一份（不回写库，编辑时自然会存）
-    for (const p of loaded) {
-      if (p.pid == null || String(p.pid).trim() === '') {
-        const id = idOf(p.name);
-        if (id) p.pid = id;
-      }
-    }
+    // 旧数据迁移：把「咪咪(1)」拆成 名字=咪咪 + pid=1（不回写库，编辑时自然会存）
+    for (const p of loaded) stripNameSuffix(p);
     // 启动期间用户可能已经开始上传（异步竞争）：内存里刚加、但不在库快照里的记录要保留，避免被覆盖
     const strays = photos.filter((p) => !loaded.some((l) => l.id === p.id));
     photos = [...strays, ...loaded];

@@ -125,9 +125,11 @@ body.demo-mode #clearAll{opacity:.4;pointer-events:none;}
 
 /* ---------- photo list ---------- */
 .list-head{
-  display:flex;align-items:center;justify-content:space-between;
+  display:flex;align-items:center;
   font-size:12px;color:var(--ink-2);padding:0 2px 8px;border-bottom:1px solid var(--line);margin-bottom:10px;
 }
+.list-head .tag{margin-left:auto;}
+.list-head .sort-btn{margin-left:6px;}
 .photo-list{overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:10px;padding-right:4px;}
 .photo-list::-webkit-scrollbar{width:7px;}
 .photo-list::-webkit-scrollbar-thumb{background:#E8D8C6;border-radius:9px;}
