@@ -1349,7 +1349,7 @@ async function importBackupZip(file) {
         crop: it.crop || null
       };
       rec._bitmap = await decodeFile(blob);
-      const thumb = await resizeToBlob(rec._bitmap, THUMB_SIZE, 0.78);
+      const thumb = (await resizeToBlob(rec._bitmap, THUMB_SIZE, 0.78)).blob;
       rec._thumbUrl = URL.createObjectURL(thumb);
       rec.w = rec.w || rec._bitmap.width;      // 旧备份若没存尺寸，用解码结果补上
       rec.h = rec.h || rec._bitmap.height;
@@ -1774,7 +1774,9 @@ $('clearAll').addEventListener('click', async () => {
         if (id) p.pid = id;
       }
     }
-    photos = loaded;
+    // 启动期间用户可能已经开始上传（异步竞争）：内存里刚加、但不在库快照里的记录要保留，避免被覆盖
+    const strays = photos.filter((p) => !loaded.some((l) => l.id === p.id));
+    photos = [...strays, ...loaded];
   } catch (e) {
     storageOK = false;
     console.warn('本地存储不可用，照片只保存在当前页面', e);
