@@ -121,6 +121,55 @@
 
 </main>
 
+<div class="crop-modal" id="cropModal">
+  <div class="crop-panel">
+    <div class="crop-head">
+      <h2>裁剪照片</h2>
+      <span class="crop-step" id="cropStep"></span>
+    </div>
+
+    <div class="crop-stage-wrap">
+      <div class="crop-stage" id="cropStage">
+        <canvas id="cropCanvas"></canvas>
+        <div class="crop-box" id="cropBox">
+          <span class="cg" data-h="nw"></span>
+          <span class="cg" data-h="ne"></span>
+          <span class="cg" data-h="sw"></span>
+          <span class="cg" data-h="se"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="crop-row">
+      <span class="crop-lbl">比例</span>
+      <div class="seg-btns" id="ratioSeg">
+        <button type="button" data-ratio="1" class="on">1:1 正方形</button>
+        <button type="button" data-ratio="free">自由</button>
+        <button type="button" data-ratio="0.75">3:4 竖</button>
+        <button type="button" data-ratio="1.333">4:3 横</button>
+      </div>
+    </div>
+
+    <div class="crop-row">
+      <span class="crop-lbl">旋转</span>
+      <div class="crop-btns">
+        <button class="btn-soft" id="rotL">↺ 左转 90°</button>
+        <button class="btn-soft" id="rotR">↻ 右转 90°</button>
+      </div>
+    </div>
+
+    <p class="crop-hint">拖动方框可移动，拖四个角可缩放。想把猫脸放大一点，就缩小方框只框住脸。</p>
+
+    <div class="crop-actions">
+      <button class="btn-ghost" id="cropReset">重置成原图</button>
+      <span class="crop-spacer"></span>
+      <button class="btn-soft" id="cropSkipAll">全部保持原样</button>
+      <button class="btn-soft" id="cropSkip">取消</button>
+      <button class="btn-primary" id="cropApply">确定</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 <div class="lightbox" id="lightbox"><img alt="预览" id="lightboxImg"></div>
 

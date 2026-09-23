@@ -12,7 +12,9 @@
 - 纯前端零依赖：`index.html` + `style.css` + `app.js`，无构建步骤。
 - 本地预览：`cd /Users/alpha/Downloads/catsmap && /Users/alpha/.workbuddy/binaries/python/versions/3.13.12/bin/python3 -m http.server 8848`
   - **固定用 8848 端口**：照片存在浏览器 IndexedDB，数据绑定「源地址」，换端口 = 换一个空库。
-- 照片存储：IndexedDB 库 `catsmap` / 表 `photos`（主键 id，字段 name/date/place/note/blob/thumb/w/h/createdAt）。
+- 照片存储：IndexedDB 库 `catsmap` / 表 `photos`（主键 id，字段 name/date/place/note/blob/thumb/w/h/createdAt/crop）。
+  - `crop`（2026-09-23 新增，可选）= `{rot,x,y,w,h}`：rot 为 0/90/180/270，x/y/w/h 是「旋转后图」上的归一化比例。**非破坏式**：原图 blob 永不动，裁剪只存参数；无 crop 字段 = 用原图（老数据天然兼容）。
+  - 备份/导入已带 crop 字段，换电脑可还原裁剪结果。
 - 常用路径：node = `/Users/alpha/.workbuddy/binaries/node/versions/22.22.2-3/bin/node`；Chrome = `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
 
 ## 验证套路的坑（踩过）
@@ -23,5 +25,7 @@
 ## 已确认的产品口径
 - 统计四项：照片 / 猫咪 / 客户 / 最近探访。`合照(x)` 不算猫；未命名照片合计算 1 只「未命名猫」、每张各算 1 位客户；有名字无编号的合并算 1 位客户。
 - 文件名规则：`客户id-猫咪名称-地址`（地址可省略、可含 `-`），`all` → `合照(id)`；自动填入后仍可手改。
-- 排列方式：2026-09-23 用户要求**回退**为「按照片数均分」（默认）＋「几 × 几 铺满」，此前的「正方格平铺」方案已撤销，不要再擅自改回。
+- 排列方式：2026-09-23 用户明确确认**保留**「按照片数均分」（默认）＋「几 × 几 铺满」两种；此前的「正方格平铺」方案（squareGrid/bestSquareGrid）已永久废弃，**不要再擅自改回**。
 - 单张照片：均分模式下整头完整放入（不裁切）+ 米色留白。
+- 裁剪（2026-09-23 用户三选一确认）：默认 **1:1 正方形**；**上传后自动弹出**逐张裁剪（可「全部保持原样」跳过），卡片上永远有「裁剪」入口可回头改；**支持旋转**（左/右 90°）。比例另提供 自由 / 3:4 / 4:3 预设。
+  - 关键认知：单独把照片裁成方形**解决不了**「每格都看得到猫」——格子不是方形时，方形照片要么留白要么被二次裁切。裁剪的价值在于「让猫脸落在裁剪框正中」。

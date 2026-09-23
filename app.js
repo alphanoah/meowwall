@@ -188,7 +188,108 @@ function resizeToBlob(src, maxSide, quality) {
 }
 
 /* =========================================================
+   裁剪（非破坏式）
+   原图始终保留，只在记录里多存一组裁剪参数：
+     crop = { rot:0|90|180|270, x,y,w,h }   x/y/w/h 是「旋转后的图」上的归一化比例
+   没有 crop 字段 = 用原图整张（老数据天然兼容）
+   ========================================================= */
+const FULL_CROP = { rot: 0, x: 0, y: 0, w: 1, h: 1 };
+
+// 兼容 ImageBitmap / canvas / HTMLImage 三种来源
+const pxW = (img) => img.width || img.naturalWidth || 0;
+const pxH = (img) => img.height || img.naturalHeight || 0;
+
+function cropOf(rec) { return rec.crop || FULL_CROP; }
+
+function isCropped(rec) {
+  const c = rec.crop;
+  if (!c) return false;
+  if (c.rot) return true;
+  return c.x > 0.002 || c.y > 0.002 || c.w < 0.998 || c.h < 0.998;
+}
+
+// 把原图旋转后的画布（缓存，最长边不超过存库尺寸，避免大图占内存）
+function rotatedCanvas(rec, rot) {
+  const bmp = rec._bitmap;
+  const bw = pxW(bmp), bh = pxH(bmp);
+  const swap = rot % 180 !== 0;
+  const rw = swap ? bh : bw;
+  const rh = swap ? bw : bh;
+  const k = Math.min(1, MAX_SIZE / Math.max(rw, rh));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(rw * k));
+  c.height = Math.max(1, Math.round(rh * k));
+  const x = c.getContext('2d');
+  x.fillStyle = '#fff';
+  x.fillRect(0, 0, c.width, c.height);
+  x.translate(c.width / 2, c.height / 2);
+  x.rotate(rot * Math.PI / 180);
+  x.scale(k, k);
+  x.drawImage(bmp, -bw / 2, -bh / 2);
+  return c;
+}
+
+// 拼贴时真正取用的图：有旋转就返回旋转后的缓存，否则原图
+function sourceOf(rec) { return rec._rotSrc || rec._bitmap; }
+
+// 裁剪参数变了以后重建旋转缓存（rot = 0 时直接清掉）
+function prepareSrc(rec) {
+  const rot = (rec.crop && rec.crop.rot) || 0;
+  rec._rotSrc = (rot && rec._bitmap) ? rotatedCanvas(rec, rot) : null;
+}
+
+// 按当前裁剪参数，把「保留区域」等比放进 w×h（cover：铺满并居中裁切多余部分）
+function drawCover(cx, rec, x, y, w, h) {
+  const img = sourceOf(rec);
+  if (!img) return;
+  const iw = pxW(img), ih = pxH(img);
+  if (!iw || !ih) return;
+  const c = cropOf(rec);
+  const sw = Math.max(1, iw * c.w), sh = Math.max(1, ih * c.h);
+  const sx = iw * c.x, sy = ih * c.y;
+  const k = Math.max(w / sw, h / sh);
+  const dw = sw * k, dh = sh * k;
+  cx.drawImage(img, sx, sy, sw, sh, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+}
+
+// 同样按裁剪参数，但「完整放入」不裁切，留白补底色（单张照片时用）
+function drawContain(cx, rec, x, y, w, h, bg) {
+  const img = sourceOf(rec);
+  if (!img) return;
+  const iw = pxW(img), ih = pxH(img);
+  if (!iw || !ih) return;
+  const c = cropOf(rec);
+  const sw = Math.max(1, iw * c.w), sh = Math.max(1, ih * c.h);
+  const sx = iw * c.x, sy = ih * c.y;
+  const k = Math.min(w / sw, h / sh);
+  const dw = sw * k, dh = sh * k;
+  cx.fillStyle = bg;
+  cx.fillRect(x, y, w, h);
+  cx.drawImage(img, sx, sy, sw, sh, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+}
+
+// 按裁剪结果重做缩略图（保持裁剪后的比例，最长边 THUMB_SIZE）
+function croppedThumb(rec) {
+  const img = sourceOf(rec);
+  if (!img) return Promise.resolve(null);
+  const iw = pxW(img), ih = pxH(img);
+  const c = cropOf(rec);
+  const sw = Math.max(1, iw * c.w), sh = Math.max(1, ih * c.h);
+  const sx = iw * c.x, sy = ih * c.y;
+  const k = Math.min(1, THUMB_SIZE / Math.max(sw, sh));
+  const dw = Math.max(1, Math.round(sw * k)), dh = Math.max(1, Math.round(sh * k));
+  const cv = document.createElement('canvas');
+  cv.width = dw; cv.height = dh;
+  const x = cv.getContext('2d');
+  x.fillStyle = '#fff';
+  x.fillRect(0, 0, dw, dh);
+  x.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
+  return new Promise((resolve) => cv.toBlob((b) => resolve(b), 'image/jpeg', 0.78));
+}
+
+/* =========================================================
    文件名解析：客户id-猫咪名称-地址（地址可省略）
+
    例：8-波波.png      -> 波波(8)
        8-all.JPG      -> 合照(8)
        8-波波-A栋302   -> 波波(8) + 地址 A栋302
@@ -249,12 +350,14 @@ async function addFiles(fileList) {
   toast(`正在处理 ${files.length} 张照片…`);
   let ok = 0;
   let auto = 0;
+  const added = [];
   for (const f of files) {
     try {
       const rec = await fileToRecord(f);
       if (rec._autoFilled) auto++;
       photos.unshift(rec);
       await saveRecord(rec);
+      added.push(rec);
       ok++;
       renderList();
       renderMosaic();
@@ -266,11 +369,12 @@ async function addFiles(fileList) {
   toast(auto ? `已加入 ${ok} 张照片，其中 ${auto} 张按文件名自动填好了名字` : `已加入 ${ok} 张照片`);
   renderStats();
   renderMosaic(true);
+  openCropQueue(added);   // 上传后紧接着逐张裁剪（可一键全部保持原样）
 }
 
 async function saveRecord(rec) {
   if (rec.demo) return; // 示例照片不入库
-  const { _bitmap, _thumbUrl, _autoFilled, ...clean } = rec;
+  const { _bitmap, _rotSrc, _thumbUrl, _autoFilled, ...clean } = rec;
   try { await dbPut(clean); }
   catch (e) { storageOK = false; }
 }
@@ -417,6 +521,10 @@ function renderList() {
           <input class="f-place" data-k="place" placeholder="地址 / 楼栋" value="${escapeAttr(p.place)}">
         </div>
         <input class="f-note" data-k="note" placeholder="备注：吃了几口、便便、精神状态…" value="${escapeAttr(p.note)}">
+        <div class="card-foot">
+          <button class="mini-btn" data-act="crop" title="裁剪这张照片（原图会保留）">裁剪</button>
+          ${isCropped(p) ? '<span class="mini-flag">已裁剪</span>' : ''}
+        </div>
       </div>
       <button class="del" title="删除这张">&times;</button>`;
     box.appendChild(el);
@@ -483,6 +591,12 @@ $('photoList').addEventListener('click', async (e) => {
   const rec = photos.find((p) => p.id === card.dataset.id);
   if (!rec) return;
 
+  if (e.target.closest('[data-act="crop"]')) {
+    cropQueue = [];
+    cropIdx = 0;
+    openCropModal(rec, false);   // false = 从卡片进来，只有这一张
+    return;
+  }
   if (e.target.closest('.del')) {
     if (!confirm(`删除「${catNameOf(rec)}」这张照片？`)) return;
     photos = photos.filter((p) => p.id !== rec.id);
@@ -503,14 +617,6 @@ $('lightbox').addEventListener('click', () => $('lightbox').classList.remove('sh
 /* =========================================================
    大猫头拼贴渲染
    ========================================================= */
-function drawCover(cx, img, x, y, w, h) {
-  const iw = img.width || img.naturalWidth;
-  const ih = img.height || img.naturalHeight;
-  if (!iw || !ih) return;
-  const k = Math.max(w / iw, h / ih);
-  const dw = iw * k, dh = ih * k;
-  cx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
-}
 
 /* ---------- 版面计算 ---------- */
 
@@ -623,7 +729,7 @@ function renderMosaic(report) {
     ctx.clip(catPath2D);
     const order = shuffleWithSeed(loaded, seed);
     rects.forEach((rc, i) => {
-      const img = order[i % order.length]._bitmap;
+      const rec = order[i % order.length];
       const x = rc.x + gap / 2;
       const y = rc.y + gap / 2;
       const w = Math.max(1, rc.w - gap);
@@ -631,14 +737,9 @@ function renderMosaic(report) {
 
       if (layoutMode === 'auto' && n === 1) {
         // 单张：完整放入（不裁切），留白处补底色
-        const iw = img.width || img.naturalWidth;
-        const ih = img.height || img.naturalHeight;
-        ctx.fillStyle = '#FBF1E4';
-        ctx.fillRect(x, y, w, h);
-        const k = Math.min(w / iw, h / ih);
-        ctx.drawImage(img, x + (w - iw * k) / 2, y + (h - ih * k) / 2, iw * k, ih * k);
+        drawContain(ctx, rec, x, y, w, h, '#FBF1E4');
       } else {
-        drawCover(ctx, img, x, y, w, h);
+        drawCover(ctx, rec, x, y, w, h);
       }
     });
     // 轻微高光，让层次更柔和
@@ -722,7 +823,7 @@ async function exportBackup() {
   try { rows = await dbAll(); } catch (e) { /* 存储不可用时退回内存里的照片 */ }
   if (!rows.length) {
     const src = demoActive ? (demoSnapshot || []) : photos;   // 示例模式下导出的是真实照片
-    rows = src.filter((p) => !p.demo).map(({ _bitmap, _thumbUrl, ...r }) => r);
+    rows = src.filter((p) => !p.demo).map(({ _bitmap, _rotSrc, _thumbUrl, ...r }) => r);
   }
   if (!rows.length) return toast('还没有照片可以备份');
 
@@ -733,6 +834,7 @@ async function exportBackup() {
       list.push({
         id: r.id, name: r.name || '', date: r.date || '', place: r.place || '', note: r.note || '',
         w: r.w || 0, h: r.h || 0, createdAt: r.createdAt || 0,
+        crop: r.crop || null,
         img: await blobToDataURL(r.blob),
         thumb: r.thumb ? await blobToDataURL(r.thumb) : ''
       });
@@ -771,10 +873,12 @@ async function importBackup(file) {
       const rec = {
         id: it.id || uid(), name: it.name || '', date: it.date || todayISO(),
         place: it.place || '', note: it.note || '',
-        blob, thumb, w: it.w || 0, h: it.h || 0, createdAt: it.createdAt || Date.now()
+        blob, thumb, w: it.w || 0, h: it.h || 0, createdAt: it.createdAt || Date.now(),
+        crop: it.crop || null
       };
       rec._bitmap = await decodeFile(rec.blob);
       rec._thumbUrl = URL.createObjectURL(thumb);
+      prepareSrc(rec);
       photos = photos.filter((p) => p.id !== rec.id);
       photos.unshift(rec);
       await saveRecord(rec);
@@ -785,6 +889,251 @@ async function importBackup(file) {
   renderMosaic(true);
   renderStats();
   toast(ok ? `已恢复 ${ok} 张照片` : '导入失败，请检查备份文件');
+}
+
+/* =========================================================
+   裁剪编辑器
+   ========================================================= */
+const CROP_MAX_W = 460;     // 编辑区最大显示宽（css px）
+const CROP_MAX_H = 360;     // 编辑区最大显示高
+const CROP_MIN = 40;        // 裁剪框最小边长（显示像素）
+
+let cropQueue = [];         // 待裁剪队列（上传后自动进入）
+let cropIdx = 0;
+let cropInQueue = false;    // true = 上传后的连续裁剪；false = 卡片上单独点开的
+let cropRec = null;
+let cropRot = 0;
+let cropRatio = 1;          // 数字 = 宽/高（锁定比例）；'free' = 自由
+let cropDispW = 0, cropDispH = 0, cropScale = 1;
+let cropBoxPx = { l: 0, t: 0, w: 0, h: 0 };
+let cropDrag = null;
+
+const clampNum = (v, a, b) => Math.min(b, Math.max(a, v));
+
+// 上传后：把这批新照片逐张送进裁剪
+function openCropQueue(list) {
+  const queue = (list || []).filter((r) => r && r._bitmap);
+  if (!queue.length) return;
+  cropQueue = queue;
+  cropIdx = 0;
+  openCropModal(cropQueue[0], true);
+}
+
+function openCropModal(rec, inQueue) {
+  if (!rec || !rec._bitmap) return;
+  cropRec = rec;
+  cropInQueue = !!inQueue;
+  cropRot = (rec.crop && rec.crop.rot) || 0;
+  cropRatio = 1;
+  buildCropStage();
+
+  const c = rec.crop;
+  const isFull = !c || (c.x === 0 && c.y === 0 && c.w === 1 && c.h === 1);
+  if (c && (c.rot || 0) === cropRot && !isFull) {
+    cropBoxPx = { l: c.x * cropDispW, t: c.y * cropDispH, w: c.w * cropDispW, h: c.h * cropDispH };
+    clampBox();
+    // 已经是裁剪过的照片：反推它像哪个预设比例，像就选中，否则显示「自由」
+    const r = cropBoxPx.w / cropBoxPx.h;
+    const hit = [1, 0.75, 1.333].find((p) => Math.abs(p - r) < 0.02);
+    cropRatio = hit || 'free';
+  } else {
+    resetBoxForRatio();
+  }
+  setRatioBtns();
+  layoutCropBox();
+
+  $('cropStep').textContent = cropQueue.length > 1
+    ? `第 ${cropIdx + 1} / ${cropQueue.length} 张　${catNameOf(rec)}`
+    : catNameOf(rec);
+  $('cropSkip').textContent = cropInQueue ? '跳过这张' : '取消';
+  $('cropSkipAll').style.display = (cropInQueue && cropQueue.length > 1) ? '' : 'none';
+  $('cropModal').classList.add('show');
+  document.body.classList.add('cropping');
+}
+
+// 把「旋转后的图」按比例画进编辑区，并算好显示尺寸
+function buildCropStage() {
+  const bmp = cropRec._bitmap;
+  const bw = pxW(bmp), bh = pxH(bmp);
+  const swap = cropRot % 180 !== 0;
+  const rw = swap ? bh : bw;
+  const rh = swap ? bw : bh;
+
+  let kf = Math.min(CROP_MAX_W / rw, CROP_MAX_H / rh);
+  kf = Math.min(kf, 3);                       // 小图最多放大 3 倍，方便拖
+  cropDispW = Math.max(60, Math.round(rw * kf));
+  cropDispH = Math.max(60, Math.round(rh * kf));
+  cropScale = Math.max(cropDispW / rw, cropDispH / rh);
+
+  const cv = $('cropCanvas');
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = Math.round(cropDispW * dpr);
+  cv.height = Math.round(cropDispH * dpr);
+  cv.style.width = cropDispW + 'px';
+  cv.style.height = cropDispH + 'px';
+
+  const x = cv.getContext('2d');
+  x.setTransform(dpr, 0, 0, dpr, 0, 0);
+  x.fillStyle = '#F3EADF';
+  x.fillRect(0, 0, cropDispW, cropDispH);
+  x.save();
+  x.translate(cropDispW / 2, cropDispH / 2);
+  x.rotate(cropRot * Math.PI / 180);
+  x.scale(cropScale, cropScale);
+  x.drawImage(bmp, -bw / 2, -bh / 2);
+  x.restore();
+}
+
+// 默认裁剪框：按当前比例取「能放下的最大一块」，居中
+function resetBoxForRatio() {
+  const r = cropRatio === 'free' ? cropDispW / cropDispH : cropRatio;
+  let w = cropDispW, h = w / r;
+  if (h > cropDispH) { h = cropDispH; w = h * r; }
+  cropBoxPx = { l: (cropDispW - w) / 2, t: (cropDispH - h) / 2, w, h };
+}
+
+function layoutCropBox() {
+  const el = $('cropBox');
+  el.style.left = cropBoxPx.l + 'px';
+  el.style.top = cropBoxPx.t + 'px';
+  el.style.width = cropBoxPx.w + 'px';
+  el.style.height = cropBoxPx.h + 'px';
+}
+
+function clampBox() {
+  const r = cropRatio === 'free' ? null : cropRatio;
+  cropBoxPx.w = clampNum(cropBoxPx.w, CROP_MIN, cropDispW);
+  cropBoxPx.h = clampNum(cropBoxPx.h, CROP_MIN, cropDispH);
+  if (r) {
+    if (cropBoxPx.w > cropDispW) { cropBoxPx.w = cropDispW; cropBoxPx.h = cropBoxPx.w / r; }
+    if (cropBoxPx.h > cropDispH) { cropBoxPx.h = cropDispH; cropBoxPx.w = cropBoxPx.h * r; }
+    if (cropBoxPx.w < CROP_MIN) { cropBoxPx.w = CROP_MIN; cropBoxPx.h = cropBoxPx.w / r; }
+    if (cropBoxPx.h < CROP_MIN) { cropBoxPx.h = CROP_MIN; cropBoxPx.w = cropBoxPx.h * r; }
+  }
+  cropBoxPx.l = clampNum(cropBoxPx.l, 0, Math.max(0, cropDispW - cropBoxPx.w));
+  cropBoxPx.t = clampNum(cropBoxPx.t, 0, Math.max(0, cropDispH - cropBoxPx.h));
+}
+
+function setRatioBtns() {
+  Array.from($('ratioSeg').children).forEach((b) => {
+    b.classList.toggle('on', String(b.dataset.ratio) === String(cropRatio));
+  });
+}
+
+// 切换预设比例：保持当前框中心，按新比例重排
+function applyRatio() {
+  const r = cropRatio;
+  const cx = cropBoxPx.l + cropBoxPx.w / 2;
+  const cy = cropBoxPx.t + cropBoxPx.h / 2;
+  let h = cropBoxPx.h, w = h * r;
+  if (w > cropDispW) { w = cropDispW; h = w / r; }
+  if (h > cropDispH) { h = cropDispH; w = h * r; }
+  cropBoxPx = { l: cx - w / 2, t: cy - h / 2, w: Math.max(CROP_MIN, w), h: Math.max(CROP_MIN, h) };
+  clampBox();
+  layoutCropBox();
+}
+
+function rotateCrop(delta) {
+  cropRot = ((cropRot + delta) % 360 + 360) % 360;
+  buildCropStage();
+  resetBoxForRatio();
+  layoutCropBox();
+}
+
+function applyCropDrag(dx, dy) {
+  const SW = cropDispW, SH = cropDispH;
+  const b0 = cropDrag.box;
+  const mode = cropDrag.mode;
+
+  if (mode === 'move') {
+    cropBoxPx = {
+      l: clampNum(b0.l + dx, 0, Math.max(0, SW - b0.w)),
+      t: clampNum(b0.t + dy, 0, Math.max(0, SH - b0.h)),
+      w: b0.w, h: b0.h
+    };
+    layoutCropBox();
+    return;
+  }
+
+  const right = b0.l + b0.w;
+  const bottom = b0.t + b0.h;
+  const isE = mode.indexOf('e') >= 0;      // 拖右角 → 左边界固定
+  const isS = mode.indexOf('s') >= 0;      // 拖下角 → 上边界固定
+  const maxW = isE ? SW - b0.l : right;
+  const maxH = isS ? SH - b0.t : bottom;
+  let W, H;
+
+  if (cropRatio === 'free') {
+    W = isE ? b0.w + dx : b0.w - dx;
+    H = isS ? b0.h + dy : b0.h - dy;
+    W = clampNum(W, Math.min(CROP_MIN, maxW), Math.max(CROP_MIN, maxW));
+    H = clampNum(H, Math.min(CROP_MIN, maxH), Math.max(CROP_MIN, maxH));
+  } else {
+    const r = cropRatio;
+    const rawW = isE ? b0.w + dx : b0.w - dx;
+    const rawH = isS ? b0.h + dy : b0.h - dy;
+    if (Math.abs(rawW - b0.w) >= Math.abs(rawH - b0.h)) { W = rawW; H = W / r; }
+    else { H = rawH; W = H * r; }
+    W = Math.max(CROP_MIN, Math.min(W, maxW, maxH * r));
+    H = W / r;
+  }
+
+  cropBoxPx = { l: isE ? b0.l : right - W, t: isS ? b0.t : bottom - H, w: W, h: H };
+  clampBox();
+  layoutCropBox();
+}
+
+// 保存裁剪结果：原图不动，只改参数，并重建缩略图
+async function commitCrop(rec, norm) {
+  if (norm) rec.crop = norm; else delete rec.crop;
+  prepareSrc(rec);
+  try {
+    const tb = await croppedThumb(rec);
+    if (tb) {
+      if (rec._thumbUrl) { try { URL.revokeObjectURL(rec._thumbUrl); } catch (e) { /* ignore */ } }
+      rec.thumb = tb;
+      rec._thumbUrl = URL.createObjectURL(tb);
+    }
+  } catch (e) { console.warn('缩略图重建失败', e); }
+  await saveRecord(rec);
+}
+
+function nextInCropQueue() {
+  renderList();
+  renderMosaic(true);
+  if (!cropInQueue) return closeCropModal();
+  cropIdx++;
+  if (cropIdx < cropQueue.length) openCropModal(cropQueue[cropIdx], true);
+  else { closeCropModal(); toast('裁剪完成'); }
+}
+
+function closeCropModal() {
+  $('cropModal').classList.remove('show');
+  document.body.classList.remove('cropping');
+  cropRec = null;
+  cropQueue = [];
+  cropIdx = 0;
+  cropDrag = null;
+}
+
+async function applyCrop() {
+  const rec = cropRec;
+  if (!rec) return;
+  const norm = {
+    rot: cropRot,
+    x: cropBoxPx.l / cropDispW,
+    y: cropBoxPx.t / cropDispH,
+    w: cropBoxPx.w / cropDispW,
+    h: cropBoxPx.h / cropDispH
+  };
+  const full = !norm.rot && norm.x < 0.002 && norm.y < 0.002 && norm.w > 0.998 && norm.h > 0.998;
+  const next = full ? null : norm;
+  const cur = rec.crop || null;
+  const same = (!cur && !next) || (cur && next &&
+    cur.rot === next.rot && Math.abs(cur.x - next.x) < 0.001 && Math.abs(cur.y - next.y) < 0.001 &&
+    Math.abs(cur.w - next.w) < 0.001 && Math.abs(cur.h - next.h) < 0.001);
+  if (!same) await commitCrop(rec, next);
+  nextInCropQueue();
 }
 
 /* =========================================================
@@ -803,6 +1152,70 @@ $('importInput').addEventListener('change', (e) => {
 });
 $('fileInput').addEventListener('change', (e) => { addFiles(e.target.files); e.target.value = ''; });
 $('cameraInput').addEventListener('change', (e) => { addFiles(e.target.files); e.target.value = ''; });
+
+/* ---------- 裁剪弹窗 ---------- */
+$('ratioSeg').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-ratio]');
+  if (!btn) return;
+  const raw = btn.dataset.ratio;
+  cropRatio = raw === 'free' ? 'free' : Number(raw);
+  setRatioBtns();
+  if (cropRatio !== 'free') applyRatio();
+});
+
+$('rotL').addEventListener('click', () => rotateCrop(-90));
+$('rotR').addEventListener('click', () => rotateCrop(90));
+
+$('cropReset').addEventListener('click', () => {
+  cropRot = 0;
+  cropRatio = 1;
+  setRatioBtns();
+  buildCropStage();
+  resetBoxForRatio();
+  layoutCropBox();
+});
+
+$('cropApply').addEventListener('click', applyCrop);
+
+$('cropSkip').addEventListener('click', () => {
+  if (cropInQueue) nextInCropQueue();
+  else closeCropModal();
+});
+
+$('cropSkipAll').addEventListener('click', () => {
+  closeCropModal();
+  toast('已按原图保留，之后随时可以在照片卡片上点「裁剪」');
+});
+
+const cropBoxEl = $('cropBox');
+cropBoxEl.addEventListener('pointerdown', (e) => {
+  if (!cropRec) return;
+  const handle = e.target.closest('.cg');
+  cropDrag = {
+    mode: handle ? handle.dataset.h : 'move',
+    x0: e.clientX, y0: e.clientY,
+    box: { l: cropBoxPx.l, t: cropBoxPx.t, w: cropBoxPx.w, h: cropBoxPx.h }
+  };
+  try { cropBoxEl.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  e.preventDefault();
+});
+cropBoxEl.addEventListener('pointermove', (e) => {
+  if (!cropDrag) return;
+  applyCropDrag(e.clientX - cropDrag.x0, e.clientY - cropDrag.y0);
+});
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach((ev) =>
+  cropBoxEl.addEventListener(ev, () => { cropDrag = null; }));
+
+document.addEventListener('keydown', (e) => {
+  if (!$('cropModal').classList.contains('show')) return;
+  if (e.key === 'Escape') {
+    if (cropInQueue) nextInCropQueue(); else closeCropModal();
+  } else if (e.key === 'Enter') {
+    if (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+    e.preventDefault();
+    applyCrop();
+  }
+});
 
 const dz = $('dropzone');
 ['dragenter', 'dragover'].forEach((ev) =>
@@ -866,6 +1279,7 @@ $('clearAll').addEventListener('click', async () => {
       try {
         r._bitmap = await decodeFile(r.blob);
         r._thumbUrl = URL.createObjectURL(r.thumb || r.blob);
+        prepareSrc(r);
       } catch (e) { continue; }
       loaded.push(r);
     }
