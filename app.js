@@ -793,6 +793,196 @@ function renderMosaic(report) {
 }
 
 /* =========================================================
+   导出图片包（zip，零依赖 STORE 打包）
+   内容：每张照片的成品 JPEG（按裁剪参数渲染）+ 拼贴大猫头 PNG + manifest.json
+   ========================================================= */
+
+// —— ZIP「仅存储」打包器（图片本身已压缩，STORE 不损失、实现最简） ——
+let _crcTable = null;
+function crc32(u8) {
+  if (!_crcTable) {
+    _crcTable = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      _crcTable[n] = c >>> 0;
+    }
+  }
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < u8.length; i++) c = _crcTable[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function zipStore(files) {
+  const enc = new TextEncoder();
+  const d = new Date();
+  const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  const dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+
+  const chunks = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const nameB = enc.encode(f.name);
+    const crc = crc32(f.data);
+
+    const local = new Uint8Array(30 + nameB.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true);        // local file header
+    lv.setUint16(4, 20, true);                // version needed
+    lv.setUint16(6, 0x0800, true);            // UTF-8 文件名
+    lv.setUint16(8, 0, true);                 // method = STORE
+    lv.setUint16(10, dosTime, true);
+    lv.setUint16(12, dosDate, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, f.data.length, true);    // compressed size
+    lv.setUint32(22, f.data.length, true);    // uncompressed size
+    lv.setUint16(26, nameB.length, true);
+    local.set(nameB, 30);
+    chunks.push(local, f.data);
+
+    const cen = new Uint8Array(46 + nameB.length);
+    const cv = new DataView(cen.buffer);
+    cv.setUint32(0, 0x02014b50, true);        // central directory
+    cv.setUint16(4, 20, true);                // version made by
+    cv.setUint16(6, 20, true);                // version needed
+    cv.setUint16(8, 0x0800, true);            // UTF-8 文件名
+    cv.setUint16(10, 0, true);                // method = STORE
+    cv.setUint16(12, dosTime, true);
+    cv.setUint16(14, dosDate, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, f.data.length, true);
+    cv.setUint32(24, f.data.length, true);
+    cv.setUint16(28, nameB.length, true);
+    cv.setUint32(42, offset, true);           // local header offset
+    cen.set(nameB, 46);
+    central.push(cen);
+
+    offset += local.length + f.data.length;
+  }
+
+  const cenSize = central.reduce((s, c) => s + c.length, 0);
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);          // end of central directory
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cenSize, true);
+  ev.setUint32(16, offset, true);
+
+  return new Blob([...chunks, ...central, eocd], { type: 'application/zip' });
+}
+
+async function blobBytes(b) { return new Uint8Array(await b.arrayBuffer()); }
+
+// —— 照片文件名：客户id-猫咪名（有 id 不会重名）；没名字/id 的给随机 ID ——
+function photoFileBase(rec) {
+  const name = (rec.name || '').trim();
+  const id = idOf(name).replace(/[\\/:*?"<>|]/g, '');
+  const base = name.replace(/\s*[（(][^()（）]*[)）]\s*$/, '').trim()
+    .replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, ' ');
+  if (id && base) return `${id}-${base}`;
+  if (id) return id;
+  if (base) return base;
+  return 'IMG-' + Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+function uniqueName(base, ext, used) {
+  let n = base, i = 1;
+  while (used.has(n.toLowerCase())) { i++; n = `${base}-${i}`; }
+  used.add(n.toLowerCase());
+  return `${n}.${ext}`;
+}
+
+// —— 按裁剪参数渲染成品 JPEG（未裁剪的 = 原图完整导出，最长边不超存库尺寸） ——
+function renderExportBlob(rec) {
+  const img = sourceOf(rec);
+  if (!img) return Promise.resolve(null);
+  const iw = pxW(img), ih = pxH(img);
+  if (!iw || !ih) return Promise.resolve(null);
+  const c = cropOf(rec);
+  const sw = Math.max(1, iw * c.w), sh = Math.max(1, ih * c.h);
+  const sx = iw * c.x, sy = ih * c.y;
+  const k = Math.min(1, MAX_SIZE / Math.max(sw, sh));
+  const w = Math.max(1, Math.round(sw * k)), h = Math.max(1, Math.round(sh * k));
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const x = cv.getContext('2d');
+  x.fillStyle = '#fff';
+  x.fillRect(0, 0, w, h);
+  x.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+  return new Promise((r) => cv.toBlob((b) => r(b), 'image/jpeg', 0.9));
+}
+
+// 拼贴大猫头成品（示例模式下临时用真实照片重画，画完恢复现场）
+async function mosaicPngBlob() {
+  if (!demoActive) {
+    return await new Promise((r) => canvas.toBlob((b) => r(b), 'image/png'));
+  }
+  const keepPhotos = photos, keepSeed = seed;
+  photos = (demoSnapshot || []).filter((p) => !p.demo);
+  seed = Math.floor(Math.random() * 1e6);
+  renderMosaic();
+  const b = await new Promise((r) => canvas.toBlob((bb) => r(bb), 'image/png'));
+  photos = keepPhotos; seed = keepSeed;
+  renderMosaic();
+  return b;
+}
+
+async function exportZip() {
+  let src = demoActive ? (demoSnapshot || []) : photos;
+  src = (src || []).filter((p) => !p.demo && p._bitmap);
+  if (!src.length) return toast('还没有照片可以导出');
+
+  toast(`正在打包 ${src.length} 张照片…`);
+  const used = new Set();
+  const files = [];
+  const manifest = { app: 'catsmap', type: 'photo-pack', version: 1, exportedAt: new Date().toISOString(), photos: [] };
+
+  // 1) 每张照片的成品图
+  let done = 0;
+  for (const rec of src) {
+    try {
+      const blob = await renderExportBlob(rec);
+      if (!blob) continue;
+      const fname = uniqueName(photoFileBase(rec), 'jpg', used);
+      files.push({ name: fname, data: await blobBytes(blob) });
+      manifest.photos.push({
+        file: fname,
+        name: (rec.name || '').trim(),
+        id: idOf(rec.name || ''),
+        date: rec.date || '',
+        place: rec.place || '',
+        note: rec.note || '',
+        cropped: !!isCropped(rec)
+      });
+    } catch (e) { console.warn('一张照片导出失败，已跳过', e); }
+    done++;
+    if (done % 5 === 0) toast(`正在打包… ${done} / ${src.length}`);
+  }
+
+  if (!files.length) return toast('照片导出失败，请重试');
+
+  // 2) 拼贴大猫头
+  try {
+    const mosaic = await mosaicPngBlob();
+    if (mosaic) files.push({ name: '拼贴-大猫头.png', data: await blobBytes(mosaic) });
+    manifest.mosaic = '拼贴-大猫头.png';
+  } catch (e) { console.warn('拼贴图导出失败', e); }
+
+  // 3) 记录清单
+  manifest.count = manifest.photos.length;
+  files.push({ name: 'manifest.json', data: new TextEncoder().encode(JSON.stringify(manifest, null, 2)) });
+
+  const zip = zipStore(files);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(zip);
+  a.download = `猫咪照片包-${todayISO()}.zip`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+  toast(`图片包已保存到下载文件夹（${files.length - 1} 张照片 + 拼图 + 清单）`);
+}
+
+/* =========================================================
    下载
    ========================================================= */
 function download() {
@@ -1144,6 +1334,7 @@ $('cameraBtn').addEventListener('click', () => $('cameraInput').click());
 $('demoBtn').addEventListener('click', () => enterDemo(14));
 $('demoExit').addEventListener('click', exitDemo);
 $('exportBtn').addEventListener('click', exportBackup);
+$('zipBtn').addEventListener('click', exportZip);
 $('importBtn').addEventListener('click', () => $('importInput').click());
 $('importInput').addEventListener('change', (e) => {
   const f = e.target.files[0];
