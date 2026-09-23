@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>主体格优先填充 自测</title>
+<style>
+  body { font: 14px/1.6 system-ui, sans-serif; margin: 20px; }
+  iframe { width: 1100px; height: 900px; border: 1px solid #ccc; }
+  .pass { color: #0a7d32; font-weight: 600; }
+  .fail { color: #c22; font-weight: 600; }
+  pre { background: #f6f6f6; padding: 10px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h2>主体格优先填充 自测</h2>
+<div id="status">等待 iframe 就绪…</div>
+<pre id="out"></pre>
+<iframe id="app" src="/index.html?demo"></iframe>
+<script>
+const out = [];
+function log(s) { out.push(s); document.getElementById('out').textContent = out.join('\n'); }
+function done(ok) {
+  const el = document.getElementById('status');
+  el.innerHTML = ok ? '<span class="pass">全部通过</span>' : '<span class="fail">存在失败项</span>';
+  document.title = ok ? 'TEST-PASS' : 'TEST-FAIL';
+}
+
+function mainCountOf(cov) { return cov.filter(c => c >= 0.95).length; }
+
+function runChecks(win, doc) {
+  let ok = true;
+  // 1) 全档列数：实测覆盖率 ≥95% 的格子数应与 MAIN_CELLS 基准表一致
+  //    （表在 app.js 里是 const 声明，不在 window 上，这里固化一份基准）
+  const table = [9, 10, 13, 20, 28, 34, 41, 48, 61, 72, 89, 98, 114, 128, 146, 156, 169, 188];
+  const rowsOf = (c) => Math.ceil(900 / (1000 / c));
+  const mism = [];
+  for (let c = 5; c <= 22; c++) {
+    const got = mainCountOf(win.cellCoverages(c, rowsOf(c)));
+    if (got !== table[c - 5]) mism.push(c + '列:表' + table[c - 5] + '/测' + got);
+  }
+  log((mism.length ? 'FAIL' : 'PASS') + ' MAIN_CELLS 全档一致 5~22' + (mism.length ? ' → ' + mism.join('; ') : ''));
+  if (mism.length) ok = false;
+
+  // 2) 13 列主体格数 = 61
+  const cov13 = win.cellCoverages(13, 12);
+  log((mainCountOf(cov13) === 61 ? 'PASS' : 'FAIL') + ' 13×12 主体格 = ' + mainCountOf(cov13) + '（应 61）');
+  if (mainCountOf(cov13) !== 61) ok = false;
+
+  // 3) mainFirstRects 前 52 格全部是主体格
+  const mf = win.mainFirstRects(13, 12);
+  const tw = 1000 / 13, th = 900 / 12;
+  const idxOf = (rc) => Math.round(rc.y / th) * 13 + Math.round(rc.x / tw);
+  const bad = [];
+  for (let i = 0; i < 52; i++) if (cov13[idxOf(mf[i])] < 0.95) bad.push(i);
+  log((bad.length ? 'FAIL' : 'PASS') + ' 前 52 格全在主体内' + (bad.length ? '，异常位 ' + bad.join(',') : ''));
+  if (bad.length) ok = false;
+
+  // 4) 主体段（前 61 格）保持从上到下阅读顺序
+  const idxs = mf.map(idxOf);
+  let sorted = true;
+  for (let i = 1; i < 61; i++) if (idxs[i] <= idxs[i - 1]) sorted = false;
+  log((sorted ? 'PASS' : 'FAIL') + ' 主体段保持从上到下阅读顺序');
+  if (!sorted) ok = false;
+
+  // 5) UI：切到铺满 13 列，说明文案正确
+  doc.querySelector('#modeSeg [data-mode="grid"]').click();
+  const d = doc.getElementById('density');
+  d.value = '13';
+  d.dispatchEvent(new Event('input', { bubbles: true }));
+  const note = doc.getElementById('layoutNote').textContent;
+  const okNote = note.includes('156') && note.includes('61') && note.includes('主体格优先') && note.includes('每张照片都先完整放进主体格');
+  log((okNote ? 'PASS' : 'FAIL') + ' 说明文案 → ' + note);
+  if (!okNote) ok = false;
+
+  done(ok);
+}
+
+const iframe = document.getElementById('app');
+let tried = 0;
+const timer = setInterval(() => {
+  tried++;
+  const win = iframe.contentWindow, doc = iframe.contentDocument;
+  if (!win || !doc || !doc.getElementById('mosaicTag')) return;
+  const tag = doc.getElementById('mosaicTag').textContent;
+  if (!tag.includes('张照片')) {
+    if (tried > 200) { clearInterval(timer); log('FAIL: 照片未加载完成, tag=' + tag); done(false); }
+    return;
+  }
+  clearInterval(timer);
+  try { runChecks(win, doc); } catch (e) { log('FAIL: 异常 ' + e.message); done(false); }
+}, 100);
+</script>
+</body>
+</html>

@@ -669,6 +669,48 @@ function autoGrid(n) {
   return best || fallback;
 }
 
+/* ---------- 主体格优先填充 ----------
+   铺满模式的格子本来是从画布左上角按行生成、按行填充，
+   而猫头在画布中间：这样每张照片的第 1 份都会落在头顶/耳朵的边缘格里。
+   这里用轮廓路径 isPointInPath 对每格 9×9 采样算覆盖率（按列数缓存，
+   切换列数时重算一次），填充顺序改为：完整格（覆盖率 ≥95%）在前、
+   按从上到下阅读顺序，边缘格在后用重复照片补满。 */
+const _coverCache = new Map(); // cols -> 每格覆盖率数组（行优先）
+
+function cellCoverages(cols, rows) {
+  if (_coverCache.has(cols)) return _coverCache.get(cols);
+  const tw = VW / cols, th = VH / rows;
+  const out = [];
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      let inside = 0;
+      for (let sy = 0; sy < 9; sy++) {
+        const py = r * th + (th * (sy + 0.5)) / 9;
+        for (let sx = 0; sx < 9; sx++) {
+          const px = c * tw + (tw * (sx + 0.5)) / 9;
+          if (ctx.isPointInPath(catPath2D, px, py)) inside++;
+        }
+      }
+      out.push(inside / 81);
+    }
+  }
+  ctx.restore();
+  _coverCache.set(cols, out);
+  return out;
+}
+
+// 主体格优先的格子顺序：完整格在前（保持阅读顺序），边缘格在后
+function mainFirstRects(cols, rows) {
+  const rects = gridRects(cols, rows);
+  const cov = cellCoverages(cols, rows);
+  return rects
+    .map((_, i) => i)
+    .sort((a, b) => (cov[b] >= 0.95) - (cov[a] >= 0.95) || a - b)
+    .map((i) => rects[i]);
+}
+
 /* ---------- 完整格（主体格）与建议值 ----------
    「几 × 几 铺满」的格子先铺满整个矩形画布、再被猫头轮廓裁形，
    被裁到只剩一部分的只能算「边缘格」。
@@ -739,10 +781,13 @@ function renderMosaic(report) {
     note = '上传照片后，会按张数自动均分猫头';
     tagText = '等待照片';
   } else if (layoutMode === 'grid') {
-    rects = gridRects(cols, gridRows);
+    rects = mainFirstRects(cols, gridRows);
     const repeat = Math.max(1, Math.round(rects.length / n));
     const main = mainCellsOf(cols);
-    note = `几 × 几 铺满：${cols} × ${gridRows} = ${rects.length} 格，其中 ${main} 格在猫头主体内完整展示；${n} 张照片循环填充（每张约出现 ${repeat} 次）`;
+    const promise = main >= n
+      ? `主体格优先：每张照片都先完整放进主体格，其余格循环补满（每张约出现 ${repeat} 次）`
+      : `主体格优先：完整格 ${main} 个不够 ${n} 张，多出的照片会落到边缘格`;
+    note = `几 × 几 铺满：${cols} × ${gridRows} = ${rects.length} 格，其中 ${main} 格在猫头主体内完整展示；${promise}`;
     tagText = `${n} 张照片 · ${cols} × ${gridRows}`;
   } else if (n === 1) {
     rects = sliceRects(1);
