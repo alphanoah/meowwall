@@ -4,3 +4,7 @@
 # 日志与临时文件
 *.log
 *.tmp
+
+# 本地测试环境（puppeteer 等，不入库）
+.workbuddy/testenv/
+.workbuddy/tmp-*.png

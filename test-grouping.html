@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>pid 分组 自测</title>
+<style>
+  body { font: 14px/1.6 system-ui, sans-serif; margin: 20px; }
+  iframe { width: 1100px; height: 900px; border: 1px solid #ccc; }
+  .pass { color: #0a7d32; font-weight: 600; }
+  .fail { color: #c22; font-weight: 600; }
+  pre { background: #f6f6f6; padding: 10px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h2>pid 分组 自测</h2>
+<div id="status">等待 iframe 就绪…</div>
+<pre id="out"></pre>
+<iframe id="app" src="/index.html"></iframe>
+<script>
+const out = [];
+function log(s) { out.push(s); document.getElementById('out').textContent = out.join('\n'); }
+function done(ok) {
+  const el = document.getElementById('status');
+  el.innerHTML = ok ? '<span class="pass">全部通过</span>' : '<span class="fail">存在失败项</span>';
+  document.title = ok ? 'TEST-PASS' : 'TEST-FAIL';
+}
+
+function makeFile(name, color) {
+  const s = 200, c = document.createElement('canvas');
+  c.width = c.height = s;
+  const x = c.getContext('2d');
+  x.fillStyle = color; x.fillRect(0, 0, s, s);
+  x.fillStyle = '#8a6a4f';
+  x.beginPath(); x.arc(s / 2, s * 0.56, s * 0.3, 0, 7); x.fill();
+  const bin = atob(c.toDataURL('image/jpeg', 0.85).split(',')[1]);
+  const u8 = new Uint8Array(bin.length);
+  for (let k = 0; k < bin.length; k++) u8[k] = bin.charCodeAt(k);
+  return new File([u8], name, { type: 'image/jpeg' });
+}
+
+function setVal(input, v) {
+  input.value = v;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function runChecks(win, doc) {
+  let ok = true;
+  const chk = (cond, label, extra) => {
+    log((cond ? 'PASS ' : 'FAIL ') + label + (cond ? '' : ' → ' + (extra ?? '')));
+    if (!cond) ok = false;
+  };
+  const q = (sel, root) => (root || doc).querySelector(sel);
+  const qa = (sel, root) => [...(root || doc).querySelectorAll(sel)];
+
+  const groups = qa('.group-card');
+  chk(groups.length === 3, '5 张照片分成 3 组（90 / 91 / 未命名）', groups.length);
+
+  const g90 = groups[0], g91 = groups[1], gAnon = groups[2];
+  chk(q('.f-pid', g90).value === '90' && q('.f-pid', g91).value === '91', '组顺序 90 → 91', qa('.f-pid').map(i => i.value).join(','));
+  chk(q('.f-pid', gAnon).value === '', '未命名照片单独一组、编号为空');
+
+  const names90 = qa('.card .f-name', g90).map(i => i.value);
+  chk(names90.length === 3 &&
+      names90[0] === '奶牛(90)' && names90[1] === '咪咪(90)' && names90[2] === '合照(90)',
+      '组内 3 只、合照排最后、新照片在前', names90.join(' / '));
+
+  chk(q('[data-gk="place"]', g90).value === 'A楼302', '组头地址取自文件名', q('[data-gk="place"]', g90).value);
+  chk(/^\d{4}-\d{2}-\d{2}$/.test(q('[data-gk="date"]', g90).value), '组头日期默认今天');
+
+  chk(qa('.card .f-name', g91).length === 1 && q('.card .f-name', g91).value === '波波(91)', '订单 91 一张');
+
+  // 组头改地址 → 整组生效（改完重新渲染，值还在）
+  setVal(q('[data-gk="place"]', g90), 'C栋501');
+  chk(q('[data-gk="place"]', g90).value === 'C栋501', '组头改地址整组生效');
+
+  // 组头改 pid → 名字括号联动 + 重新归组
+  setVal(q('.f-pid', g90), '8');
+  const groups2 = qa('.group-card');
+  chk(groups2.length === 3 && q('.f-pid', groups2[0]).value === '8', '改 pid 后重新归组、排最前', qa('.f-pid').map(i => i.value).join(','));
+  const names8 = qa('.card .f-name', groups2[0]).map(i => i.value);
+  chk(names8.join('/') === '奶牛(8)/咪咪(8)/合照(8)', 'pid 同步到组内名字括号', names8.join('/'));
+  chk(q('[data-gk="place"]', groups2[0]).value === 'C栋501', '归组后地址保留');
+
+  // 给未命名照片补编号 → 归组
+  setVal(q('.f-pid', groups2[2]), '8');
+  const groups3 = qa('.group-card');
+  chk(groups3.length === 2 && q('.f-pid', groups3[0]).value === '8' && qa('.card', groups3[0]).length === 4,
+      '未命名照片补编号 8 后并入该组', groups3.length + ' 组 / 首组 ' + qa('.card', groups3[0]).length + ' 张');
+
+  // 改名字括号 → pid 联动（改「波波(91)」为「波波(7)」→ 并入 7？这里只验证 8 组改名不受影响）
+  const noteInput = q('.card .f-note', groups3[0]);
+  chk(!!noteInput, '组内仍有备注输入框');
+
+  // 收尾：关掉上传后自动弹出的裁剪队列，方便截图看列表
+  const keepBtn = [...doc.querySelectorAll('button')].find((b) => b.textContent.includes('全部保持原样'));
+  if (keepBtn) keepBtn.click();
+
+  done(ok);
+}
+
+const iframe = document.getElementById('app');
+let started = false;
+const t0 = Date.now();
+const timer = setInterval(() => {
+  const win = iframe.contentWindow, doc = iframe.contentDocument;
+  if (!win || !doc || !doc.getElementById('mosaicTag')) return;
+  if (!started && typeof win.addFiles === 'function') {
+    started = true;
+    win.addFiles([
+      makeFile('90-咪咪-A楼302.jpg', '#FFD9A8'),
+      makeFile('90-奶牛.jpg', '#D6EFFF'),
+      makeFile('90-all.jpg', '#E4F6D8'),
+      makeFile('91-波波-B花园.jpg', '#FFE3EC'),
+      makeFile('未命名猫.jpg', '#EADCFF')
+    ]);
+  }
+  if (!started) return;
+  const tag = doc.getElementById('mosaicTag').textContent;
+  if (!tag.includes('5 张照片')) {
+    if (Date.now() - t0 > 20000) { clearInterval(timer); log('FAIL: 5 张未加载完成, tag=' + tag); done(false); }
+    return;
+  }
+  clearInterval(timer);
+  try { runChecks(win, doc); } catch (e) { log('FAIL: 异常 ' + e.message); done(false); }
+}, 100);
+</script>
+</body>
+</html>

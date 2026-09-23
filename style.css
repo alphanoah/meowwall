@@ -172,6 +172,36 @@ body.demo-mode #clearAll{opacity:.4;pointer-events:none;}
 .mini-btn:hover{background:var(--accent-soft);border-color:var(--accent);}
 .mini-flag{font-size:11px;color:#B7A99B;}
 
+/* ---------- 分组卡片（按订单/家庭 pid 分组） ---------- */
+.group-card{
+  border:1px solid var(--line);border-radius:14px;background:#FFFBF5;overflow:hidden;transition:.16s;
+}
+.group-card:hover{border-color:#E6CDB2;box-shadow:0 6px 16px rgba(150,110,70,.08);}
+.group-head{
+  display:flex;align-items:center;gap:6px;padding:8px 10px;
+  background:var(--bg-2);border-bottom:1px solid var(--line);
+}
+.pid-label{
+  font-size:10.5px;font-weight:600;color:var(--accent-d);background:var(--accent-soft);
+  border-radius:6px;padding:3px 7px;flex:none;letter-spacing:.5px;
+}
+.group-head input{
+  border:1px solid transparent;background:none;border-radius:7px;padding:3px 6px;
+  font-size:11.5px;color:var(--ink-2);outline:none;transition:.15s;min-width:0;
+}
+.group-head input::placeholder{color:#CBB59B;}
+.group-head input:focus{background:#fff;border-color:#EBCFAC;box-shadow:0 0 0 3px rgba(232,137,74,.12);}
+.group-head input[type=date]{width:110px;flex:none;}
+.group-head .f-pid{width:64px;flex:none;font-weight:600;color:var(--accent-d);text-align:center;background:#fff;border-color:#F0DFCB;}
+.group-head [data-gk="place"]{flex:1;}
+.group-body{display:flex;flex-direction:column;gap:8px;padding:9px 10px 10px;}
+.group-body .card{
+  grid-template-columns:56px minmax(0,1fr) 24px;gap:9px;align-items:start;
+  border:1px solid transparent;background:none;padding:4px;box-shadow:none;
+}
+.group-body .card:hover{border-color:#F0E2CF;}
+.group-body .thumb{width:56px;height:56px;}
+
 /* ---------- crop modal ---------- */
 .crop-modal{
   position:fixed;inset:0;background:rgba(40,32,26,.68);backdrop-filter:blur(6px);
