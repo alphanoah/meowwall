@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>备份 zip 往返 自测</title>
+<style>
+  body { font: 14px/1.6 system-ui, sans-serif; margin: 20px; }
+  iframe { width: 1100px; height: 900px; border: 1px solid #ccc; }
+  .pass { color: #0a7d32; font-weight: 600; }
+  .fail { color: #c22; font-weight: 600; }
+  pre { background: #f6f6f6; padding: 10px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h2>备份 zip 往返 自测</h2>
+<div id="status">等待 iframe 就绪…</div>
+<pre id="out"></pre>
+<iframe id="app" src="/index.html"></iframe>
+<script>
+const out = [];
+function log(s) { out.push(s); document.getElementById('out').textContent = out.join('\n'); }
+function done(ok) {
+  const el = document.getElementById('status');
+  el.innerHTML = ok ? '<span class="pass">全部通过</span>' : '<span class="fail">存在失败项</span>';
+  document.title = ok ? 'TEST-PASS' : 'TEST-FAIL';
+}
+
+function makeFile(name, color) {
+  const s = 300, c = document.createElement('canvas');
+  c.width = c.height = s;
+  const x = c.getContext('2d');
+  x.fillStyle = color; x.fillRect(0, 0, s, s);
+  x.fillStyle = '#8a6a4f';
+  x.beginPath(); x.arc(s / 2, s * 0.56, s * 0.3, 0, 7); x.fill();
+  const bin = atob(c.toDataURL('image/jpeg', 0.85).split(',')[1]);
+  const u8 = new Uint8Array(bin.length);
+  for (let k = 0; k < bin.length; k++) u8[k] = bin.charCodeAt(k);
+  return new File([u8], name, { type: 'image/jpeg' });
+}
+
+function runChecks(win, doc) {
+  let ok = true;
+  const chk = (cond, label, extra) => {
+    log((cond ? 'PASS ' : 'FAIL ') + label + (cond ? '' : ' → ' + (extra ?? '')));
+    if (!cond) ok = false;
+  };
+
+  // 导入会弹 confirm，自动化里直接放行
+  win.confirm = () => true;
+
+  (async () => {
+    try {
+      // 1) 导出备份 zip
+      const built = await win.buildBackupBlob();
+      chk(!!built && built.count === 3, 'buildBackupBlob：3 张照片', built && built.count);
+      const u8 = new Uint8Array(await built.blob.arrayBuffer());
+
+      // 2) 包内容校验
+      const entries = win.zipRead(u8);
+      const names = [...entries.keys()].sort();
+      chk(names.length === 4 && names.filter((n) => n.startsWith('photos/')).length === 3 && names.includes('manifest.json'),
+          '包内 3 张原图 + manifest.json', names.join(','));
+      const mf = JSON.parse(new TextDecoder().decode(entries.get('manifest.json')));
+      chk(mf.type === 'backup' && mf.version === 2 && mf.photos.length === 3, 'manifest 类型/版本/数量');
+      const mimi = mf.photos.find((p) => p.name === '咪咪(90)');
+      chk(!!mimi && mimi.pid === '90' && mimi.place === 'A楼302' && mimi.file === `photos/${mimi.id}.jpg`,
+          'manifest 带 pid/地址/文件映射', JSON.stringify(mimi));
+      chk(entries.get(mimi.file).length > 1000, '原图是二进制 JPEG（非 base64 文本）');
+
+      // 3) 导入恢复（同 id 覆盖，往返后数据应一致）
+      const zipFile = new File([u8], '猫咪头像墙备份-2026-09-23.zip', { type: 'application/zip' });
+      await win.importBackup(zipFile);
+      await new Promise((r) => setTimeout(r, 800));
+
+      const groups = [...doc.querySelectorAll('.group-card')];
+      chk(groups.length === 2, '恢复后仍是 2 组', groups.length);
+      const namesAll = [...doc.querySelectorAll('.card .f-name')].map((i) => i.value).sort().join('/');
+      chk(namesAll === '合照(90)/咪咪(90)/波波(91)', '恢复后名字/分组不变', namesAll);
+      const place90 = doc.querySelector('.group-card [data-gk="place"]').value;
+      chk(place90 === 'A楼302', '恢复后组头地址保留', place90);
+      const tag = doc.getElementById('mosaicTag').textContent;
+      chk(tag.includes('3 张照片'), '拼贴墙正常渲染', tag);
+
+      done(ok);
+    } catch (e) {
+      log('FAIL: 异常 ' + e.message);
+      done(false);
+    }
+  })();
+}
+
+const iframe = document.getElementById('app');
+let started = false;
+const t0 = Date.now();
+const timer = setInterval(() => {
+  const win = iframe.contentWindow, doc = iframe.contentDocument;
+  if (!win || !doc || !doc.getElementById('mosaicTag')) return;
+  if (!started && typeof win.addFiles === 'function') {
+    started = true;
+    win.addFiles([
+      makeFile('90-咪咪-A楼302.jpg', '#FFD9A8'),
+      makeFile('90-all.jpg', '#E4F6D8'),
+      makeFile('91-波波-B花园.jpg', '#FFE3EC')
+    ]);
+  }
+  if (!started) return;
+  const tag = doc.getElementById('mosaicTag').textContent;
+  const modalGone = ![...doc.querySelectorAll('button')].some((b) => b.textContent.includes('全部保持原样') && b.offsetParent);
+  if (!tag.includes('3 张照片') || !modalGone) {
+    // 先关掉自动弹出的裁剪队列
+    const keepBtn = [...doc.querySelectorAll('button')].find((b) => b.textContent.includes('全部保持原样'));
+    if (keepBtn) keepBtn.click();
+    if (Date.now() - t0 > 20000) { clearInterval(timer); log('FAIL: 3 张未就绪, tag=' + tag); done(false); }
+    return;
+  }
+  clearInterval(timer);
+  try { runChecks(win, doc); } catch (e) { log('FAIL: 异常 ' + e.message); done(false); }
+}, 100);
+</script>
+</body>
+</html>

@@ -1196,41 +1196,88 @@ const blobToDataURL = (b) => new Promise((resolve, reject) => {
 });
 const dataURLToBlob = async (u) => await (await fetch(u)).blob();
 
-async function exportBackup() {
+/* 备份 = ZIP 包：原图二进制（不 base64，体积省约 1/3）+ manifest.json 元数据。
+   缩略图不入包，导入时从原图重新生成。旧版 JSON 备份导入仍然兼容。 */
+async function buildBackupBlob() {
   let rows = [];
   try { rows = await dbAll(); } catch (e) { /* 存储不可用时退回内存里的照片 */ }
   if (!rows.length) {
-    const src = demoActive ? (demoSnapshot || []) : photos;   // 示例模式下导出的是真实照片
+    const src = demoActive ? (demoSnapshot || []) : photos;   // 示例模式下备份的是真实照片
     rows = src.filter((p) => !p.demo).map(({ _bitmap, _rotSrc, _thumbUrl, ...r }) => r);
   }
-  if (!rows.length) return toast('还没有照片可以备份');
 
-  toast(`正在打包 ${rows.length} 张照片…`);
+  const files = [];
   const list = [];
   for (const r of rows) {
     try {
+      const fname = `photos/${r.id}.jpg`;
+      files.push({ name: fname, data: await blobBytes(r.blob) });
       list.push({
-        id: r.id, name: r.name || '', pid: r.pid || idOf(r.name || '') || '',
+        id: r.id, file: fname,
+        name: r.name || '', pid: r.pid || idOf(r.name || '') || '',
         date: r.date || '', place: r.place || '', note: r.note || '',
         w: r.w || 0, h: r.h || 0, createdAt: r.createdAt || 0,
-        crop: r.crop || null,
-        img: await blobToDataURL(r.blob),
-        thumb: r.thumb ? await blobToDataURL(r.thumb) : ''
+        crop: r.crop || null
       });
     } catch (e) { console.warn('有一张照片读取失败，已跳过', e); }
   }
-  const payload = { app: 'catsmap', version: 1, exportedAt: new Date().toISOString(), count: list.length, photos: list };
-  const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+  if (!list.length) return null;
+  files.push({ name: 'manifest.json', data: new TextEncoder().encode(JSON.stringify({
+    app: 'catsmap', type: 'backup', version: 2, exportedAt: new Date().toISOString(), count: list.length, photos: list
+  })) });
+  return { blob: zipStore(files), count: list.length };
+}
+
+async function exportBackup() {
+  toast('正在打包备份…');
+  const built = await buildBackupBlob();
+  if (!built) return toast('还没有照片可以备份');
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `猫咪头像墙备份-${todayISO()}.json`;
+  a.href = URL.createObjectURL(built.blob);
+  a.download = `猫咪头像墙备份-${todayISO()}.zip`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 8000);
-  toast(`备份已保存到下载文件夹（${list.length} 张照片）`);
+  toast(`备份已保存到下载文件夹（${built.count} 张照片）`);
+}
+
+/* 只解析自家备份包（STORE 无压缩）的 zip：读中央目录取文件名和数据。
+   自产自销用，不做通用解压器（不支持 DEFLATE/分卷/zip64）。 */
+function zipRead(u8) {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 22 - 65536); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('找不到 zip 目录');
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const dec = new TextDecoder();
+  const out = new Map();
+  for (let i = 0; i < count; i++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const method = dv.getUint16(p + 10, true);
+    const compSize = dv.getUint32(p + 20, true);
+    const nameLen = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const cmtLen = dv.getUint16(p + 32, true);
+    const lfhOff = dv.getUint32(p + 42, true);
+    const name = dec.decode(u8.subarray(p + 46, p + 46 + nameLen));
+    if (method !== 0) throw new Error(`包内有压缩数据，不是本应用生成的备份：${name}`);
+    const lNameLen = dv.getUint16(lfhOff + 26, true);
+    const lExtraLen = dv.getUint16(lfhOff + 28, true);
+    const start = lfhOff + 30 + lNameLen + lExtraLen;
+    out.set(name, u8.subarray(start, start + compSize));
+    p += 46 + nameLen + extraLen + cmtLen;
+  }
+  return out;
 }
 
 async function importBackup(file) {
   if (!file) return;
+  const isZip = /\.zip$/i.test(file.name) || String(file.type || '').includes('zip');
+  if (isZip) return importBackupZip(file);
+
+  // 旧版 JSON 备份（图片是 base64 dataURL）
   let data;
   try { data = JSON.parse(await file.text()); }
   catch (e) { return toast('这个文件不是有效的备份（无法解析）'); }
@@ -1258,6 +1305,54 @@ async function importBackup(file) {
       };
       rec._bitmap = await decodeFile(rec.blob);
       rec._thumbUrl = URL.createObjectURL(thumb);
+      prepareSrc(rec);
+      photos = photos.filter((p) => p.id !== rec.id);
+      photos.unshift(rec);
+      await saveRecord(rec);
+      ok++;
+    } catch (e) { console.warn('有一张导入失败', e); }
+  }
+  renderList();
+  renderMosaic(true);
+  renderStats();
+  toast(ok ? `已恢复 ${ok} 张照片` : '导入失败，请检查备份文件');
+}
+
+/* 新版 ZIP 备份导入：photos/*.jpg 原图 + manifest.json 元数据（缩略图重新生成） */
+async function importBackupZip(file) {
+  let entries;
+  try { entries = zipRead(new Uint8Array(await file.arrayBuffer())); }
+  catch (e) { return toast('这个文件不是有效的备份包'); }
+  let data;
+  try { data = JSON.parse(new TextDecoder().decode(entries.get('manifest.json'))); }
+  catch (e) { return toast('备份包清单无法解析'); }
+  if (!data || data.app !== 'catsmap' || !Array.isArray(data.photos)) {
+    return toast('这个文件不是「猫咪头像墙」的备份');
+  }
+  const items = data.photos;
+  if (!items.length) return toast('备份包里没有照片');
+  if (!confirm(`导入 ${items.length} 张照片？将与现有记录按编号合并，同编号的会覆盖。`)) return;
+
+  if (demoActive) { leaveDemoForReal(); renderList(); renderMosaic(true); }
+  toast(`正在导入 ${items.length} 张照片…`);
+  let ok = 0;
+  for (const it of items) {
+    try {
+      const raw = entries.get(it.file) || entries.get(`photos/${it.file}`);
+      if (!raw) continue;
+      const blob = new Blob([raw], { type: 'image/jpeg' });
+      const rec = {
+        id: it.id || uid(), name: it.name || '', pid: it.pid || idOf(it.name || '') || '',
+        date: it.date || todayISO(),
+        place: it.place || '', note: it.note || '',
+        w: it.w || 0, h: it.h || 0, createdAt: it.createdAt || Date.now(),
+        crop: it.crop || null
+      };
+      rec._bitmap = await decodeFile(blob);
+      const thumb = await resizeToBlob(rec._bitmap, THUMB_SIZE, 0.78);
+      rec._thumbUrl = URL.createObjectURL(thumb);
+      rec.w = rec.w || rec._bitmap.width;      // 旧备份若没存尺寸，用解码结果补上
+      rec.h = rec.h || rec._bitmap.height;
       prepareSrc(rec);
       photos = photos.filter((p) => p.id !== rec.id);
       photos.unshift(rec);

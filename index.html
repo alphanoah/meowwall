@@ -42,8 +42,8 @@
       <h2>探访照片</h2>
       <div class="head-btns">
         <button class="btn-ghost" id="zipBtn" title="把裁剪后的照片、拼贴大猫头和记录清单打包成 zip">导出图片包</button>
-        <button class="btn-ghost" id="exportBtn" title="把全部照片和记录打包成一个文件">导出备份</button>
-        <button class="btn-ghost" id="importBtn" title="从备份文件恢复照片和记录">导入恢复</button>
+        <button class="btn-ghost" id="exportBtn" title="把全部照片和记录打包成一个 zip 文件（原图 + 记录清单，体积小）">导出备份</button>
+        <button class="btn-ghost" id="importBtn" title="从备份文件恢复照片和记录（支持新版 zip 和旧版 json）">导入恢复</button>
         <button class="btn-ghost" id="clearAll">清空全部</button>
       </div>
     </div>
@@ -67,7 +67,7 @@
 
     <input type="file" id="fileInput" accept="image/*" multiple hidden>
     <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
-    <input type="file" id="importInput" accept=".json,application/json" hidden>
+    <input type="file" id="importInput" accept=".zip,.json,application/zip,application/json" hidden>
 
     <div class="list-head">
       <span>照片记录</span>
