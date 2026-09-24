@@ -1530,8 +1530,10 @@ async function confirmPickedRoot(root) {
 }
 
 // 拿到一个能写的项目根目录句柄；需要时（用户手势里）弹选择框
+let pubDirPicked = false;      // 这一轮发布有没有弹过「选择文件夹」（用来在成功提示里说明白）
 async function pickPubDir() {
   const h = await window.showDirectoryPicker({ id: 'catsmap-root', mode: 'readwrite' });
+  pubDirPicked = true;
   await confirmPickedRoot(h);
   await savePubDir(h);
   return h;
@@ -1582,6 +1584,7 @@ async function publishSite(watermark) {
 
   // 选文件夹放在最前面：这属于用户手势里的动作，等渲染完再弹框浏览器会拦
   let root = null;
+  pubDirPicked = false;
   if (canWriteDir()) {
     try {
       root = await currentPubDir(true);
@@ -1602,8 +1605,9 @@ async function publishSite(watermark) {
     const docs = await docsDirOf(root);
     await writeSiteFiles(docs, built.files);
     const where = root.name === 'docs' ? 'docs/' : `${root.name}/docs/`;
-    toast(`已写进 ${where}（${built.count} 张照片${watermark ? '，带水印' : ''}）`,
-      { label: '看看访客页', fn: openVisitorPage, ms: 9000 });
+    toast(`已写进 ${where}（${built.count} 张照片${watermark ? '，带水印' : ''}）`
+      + (pubDirPicked ? ' · 以后点发布就直接写，不会再弹框' : ''),
+      { label: '看看访客页', fn: openVisitorPage, ms: 10000 });
     return;
   } catch (e) {
     console.warn('写入文件夹失败，改成下载 zip', e);
@@ -1651,21 +1655,29 @@ function closePublishModal() {
   document.body.classList.remove('moving');
 }
 
-// 面板里那行「文件夹」说明：没选过 → 提示会弹选择框；选过了 → 显示写到哪儿
+// 面板里那行「文件夹」说明：没选过 → 讲清楚为什么弹框、只弹一次；选过了 → 直接写哪儿
 async function refreshPubDirHint() {
-  const txt = $('pubDirTxt'), btn = $('pubDirChange');
+  const txt = $('pubDirTxt'), btn = $('pubDirChange'), go = $('pubGo');
   if (!canWriteDir()) {
     txt.textContent = '这个浏览器不支持直接写文件夹，发布会下载一个 zip 包（解压到项目根目录）。';
     btn.hidden = true;
+    go.textContent = '开始发布';
     return;
   }
   const h = await readPubDir();
   if (h) {
-    txt.innerHTML = `发布直接写进 <b>${escapeAttr(h.name)}</b> 里的 <code>docs/</code>，不用解压。`;
+    txt.innerHTML = `发布直接写进 <b>${escapeAttr(h.name)}</b> 里的 <code>docs/</code>，不用解压，也不会再弹框。`;
     btn.hidden = false;
+    go.textContent = '开始发布';
+    go.title = '';
   } else {
-    txt.textContent = '第一次发布会让你选一次项目文件夹（有 index.html 的那个），以后每次都直接用。';
+    // 这里必须说清楚：网页没法自己往磁盘写文件，所以要你点这一次授权，才显得不突然
+    txt.innerHTML = '<b>第一次发布会弹一下「选择文件夹」</b>——这是浏览器的硬要求：'
+      + '网页没有权限自己往你的磁盘写文件，得由你点一次授权（框的标题写着「Select where this site can save changes」）。选中<b>项目文件夹</b>（就是有 index.html 的那个）后，'
+      + '同一个标签页里以后再发布就直接写进去，不会再问。';
     btn.hidden = true;
+    go.textContent = '选择文件夹并发布';
+    go.title = '先让你选一次项目文件夹（浏览器的授权要求），之后就不用再选了';
   }
 }
 
