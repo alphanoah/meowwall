@@ -37,6 +37,9 @@ input{font-family:inherit;}
   width:min(100%,940px);height:auto;
   max-height:calc(100dvh - 210px);
   border-radius:20px;
+  /* 拦掉手机长按的「存储图像」原生菜单，长按改由 share.js 接管（存出来带水印） */
+  -webkit-touch-callout:none;
+  -webkit-user-select:none;user-select:none;
 }
 
 /* ---------- 加载中 ---------- */

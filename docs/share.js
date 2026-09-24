@@ -477,18 +477,41 @@ function bind() {
     seed = Math.floor(Math.random() * 1e6);
     render();
   });
-  $('download').addEventListener('click', () => {
-    // 下载的是「整张都带水印」的那版；屏幕上显示的拼贴保持干净
-    watermarkedCanvas().toBlob((b) => {
-      const a = document.createElement('a');
-      const d = new Date();
-      const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-      a.href = URL.createObjectURL(b);
-      a.download = `喵星人头像墙-${stamp}.png`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 8000);
-    }, 'image/png');
-  });
+function saveMosaic() {
+  // 下载的是「整张都带水印」的那版；屏幕上显示的拼贴保持干净
+  watermarkedCanvas().toBlob((b) => {
+    const a = document.createElement('a');
+    const d = new Date();
+    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    a.href = URL.createObjectURL(b);
+    a.download = `喵星人头像墙-${stamp}.png`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+  }, 'image/png');
+}
+
+$('download').addEventListener('click', saveMosaic);
+
+// 右键大猫头本来会弹出浏览器的「图片另存为」，存的是原图没有水印 —— 拦下来走水印版
+canvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  saveMosaic();
+});
+
+// 手机长按同理：压住 0.6 秒存带水印版（原生菜单已被 CSS 关掉）
+let pressTimer = null, pressXY = null;
+canvas.addEventListener('pointerdown', (e) => {
+  pressXY = { x: e.clientX, y: e.clientY };
+  pressTimer = setTimeout(saveMosaic, 600);
+});
+['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) =>
+  canvas.addEventListener(ev, () => { clearTimeout(pressTimer); }));
+canvas.addEventListener('pointermove', (e) => {
+  // 手指滑动（想滚动页面）就不算长按
+  if (pressXY && (Math.abs(e.clientX - pressXY.x) > 10 || Math.abs(e.clientY - pressXY.y) > 10)) {
+    clearTimeout(pressTimer);
+  }
+});
   $('infoBtn').addEventListener('click', () => {
     const on = document.body.classList.toggle('hide-overview');
     $('infoBtn').setAttribute('aria-pressed', String(!on));
