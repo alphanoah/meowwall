@@ -129,7 +129,9 @@ function shuffleWithSeed(arr, s) {
    IndexedDB 存储
    ========================================================= */
 const DB_NAME = 'catsmap';
-const STORE = 'photos';
+const DB_VERSION = 2;
+const STORE = 'photos';       // 照片记录
+const KV_STORE = 'kv';        // 杂项键值（如发布用的文件夹句柄）
 let dbPromise = null;
 
 function openDB() {
@@ -141,10 +143,11 @@ function openDB() {
     // 超时兜底：某些环境（无痕模式/受限浏览器）IndexedDB 可能一直挂起
     const timer = setTimeout(() => done(reject, new Error('idb-timeout')), 4000);
     let req;
-    try { req = indexedDB.open(DB_NAME, 1); } catch (e) { clearTimeout(timer); return done(reject, e); }
+    try { req = indexedDB.open(DB_NAME, DB_VERSION); } catch (e) { clearTimeout(timer); return done(reject, e); }
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });
+      if (!db.objectStoreNames.contains(KV_STORE)) db.createObjectStore(KV_STORE);
     };
     req.onsuccess = () => { clearTimeout(timer); done(resolve, req.result); };
     req.onerror = () => { clearTimeout(timer); done(reject, req.error); };
@@ -185,6 +188,27 @@ async function dbClear() {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
     tx.objectStore(STORE).clear();
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/* 杂项键值：目前只放「上次发布选的项目文件夹」句柄（File System Access API 的
+   目录句柄可以整存进 IndexedDB，下次发布会话直接复用，不用重选） */
+async function kvGet(key) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(KV_STORE, 'readonly');
+    const r = tx.objectStore(KV_STORE).get(key);
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+async function kvPut(key, val) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(KV_STORE, 'readwrite');
+    tx.objectStore(KV_STORE).put(val, key);
     tx.oncomplete = resolve;
     tx.onerror = () => reject(tx.error);
   });
@@ -1319,10 +1343,12 @@ async function exportZip() {
 
 /* =========================================================
    发布到网站（GitHub Pages）
-   产出：一个 zip，内部已经是站点结构，在项目根目录解压即可覆盖落位
+   产出（路径都相对 docs/）：
      docs/meowtonians/<客户id-猫名>.jpg   成品图（可选叠加水印）
      docs/meowtonians/拼贴-大猫头.png     分享缩略图（og:image）
      docs/photos.json                    照片清单（只含文件名与猫名）
+   发布直接写进项目里的 docs/（File System Access API，Chrome/Edge），
+   不用再解压；浏览器不支持时退回下载一个同样的 zip 包。
    docs/ 里的 index.html / share.css / share.js 是仓库里的页面源文件，
    发布不覆盖它们，只往 docs/meowtonians/ 和 docs/photos.json 放东西。
    ========================================================= */
@@ -1330,6 +1356,7 @@ async function exportZip() {
 const WATERMARK_TEXT = 'Theo';
 const SITE_DIR = 'docs';                     // GitHub Pages 从这里发布
 const SITE_PHOTO_DIR = 'meowtonians';        // 站点内的照片目录
+const PUB_DIR_KEY = 'publishDir';            // 「上次选的项目文件夹」句柄的键
 
 // 一个小猫爪：掌垫 + 四个趾垫（以 (x,y) 为中心，s 为整体宽度）
 function pawAt(cx, x, y, s) {
@@ -1410,7 +1437,9 @@ function siteCatCount() {
   return keys.size + (keys.size ? 0 : (unnamed ? 1 : 0));
 }
 
-async function buildSiteZip(watermark) {
+// 渲染出待发布的全部文件。path 相对 docs/（如 meowtonians/1-咪咪.jpg、photos.json），
+// data 是 Uint8Array：写文件夹时直接写、兜底打包时拼上 docs/ 前缀。
+async function buildSiteFiles(watermark) {
   const src = (demoActive ? (demoSnapshot || []) : photos)
     .filter((p) => !p.demo && p._bitmap && p.blob);
   if (!src.length) return null;
@@ -1431,41 +1460,166 @@ async function buildSiteZip(watermark) {
       const blob = await renderExportBlob(rec, watermark);
       if (!blob) continue;
       const fname = uniqueName(photoFileBase(rec), 'jpg', used);
-      files.push({ name: `${SITE_DIR}/${SITE_PHOTO_DIR}/${fname}`, data: await blobBytes(blob) });
+      files.push({ path: `${SITE_PHOTO_DIR}/${fname}`, data: await blobBytes(blob) });
       // 隐私：清单只带文件名和猫名，不带地址/日期/备注/编号
       manifest.photos.push({ file: `${SITE_PHOTO_DIR}/${fname}`, name: (rec.name || '').trim() });
     } catch (e) { console.warn('一张照片发布失败，已跳过', e); }
     done++;
-    if (done % 5 === 0) toast(`正在发布… ${done} / ${src.length}`);
+    if (done % 5 === 0) toast(`正在渲染… ${done} / ${src.length}`);
   }
   if (!files.length) return null;
 
   try {
     let mosaic = await mosaicPngBlob();
     if (mosaic && watermark) mosaic = await watermarkBlob(mosaic, true);
-    if (mosaic) files.push({ name: `${SITE_DIR}/${SITE_PHOTO_DIR}/拼贴-大猫头.png`, data: await blobBytes(mosaic) });
+    if (mosaic) files.push({ path: `${SITE_PHOTO_DIR}/拼贴-大猫头.png`, data: await blobBytes(mosaic) });
   } catch (e) { console.warn('拼贴缩略图生成失败，已跳过', e); }
 
   manifest.count = manifest.photos.length;
   manifest.cats = siteCatCount();
-  files.push({ name: `${SITE_DIR}/photos.json`, data: new TextEncoder().encode(JSON.stringify(manifest, null, 2)) });
-  return zipStore(files);
+  files.push({ path: 'photos.json', data: new TextEncoder().encode(JSON.stringify(manifest, null, 2)) });
+  return { files, manifest, count: manifest.photos.length };
 }
 
-async function publishSite(watermark) {
-  const src = (demoActive ? (demoSnapshot || []) : photos).filter((p) => !p.demo && p._bitmap);
-  if (!src.length) return toast('还没有照片可以发布');
-  toast(`正在发布 ${src.length} 张照片…`);
-  let zip;
-  try { zip = await buildSiteZip(watermark); }
-  catch (e) { console.error(e); return toast('发布失败：' + e.message); }
-  if (!zip) return toast('没有可发布的照片（示例照片不会发布）');
+/* ---------- 直接写进项目里的 docs/（File System Access API） ---------- */
+
+function canWriteDir() {
+  return typeof window.showDirectoryPicker === 'function';
+}
+
+// 「上次选的项目文件夹」句柄：下次打开页面直接复用，不用重选
+async function readPubDir() {
+  if (!canWriteDir()) return null;
+  try {
+    const h = await kvGet(PUB_DIR_KEY);
+    return (h && typeof h.getDirectoryHandle === 'function') ? h : null;
+  } catch (e) { return null; }
+}
+async function savePubDir(handle) {
+  try { await kvPut(PUB_DIR_KEY, handle); } catch (e) { console.warn('记不住文件夹，下次要重选', e); }
+}
+
+// 申请读写权限。request=true 才允许弹授权框（必须在用户点击里调用）
+async function askPermission(handle, request) {
+  try {
+    if (typeof handle.queryPermission !== 'function') return 'granted';   // 老浏览器交给真正写入去报错
+    const st = await handle.queryPermission({ mode: 'readwrite' });
+    if (st === 'granted' || !request || typeof handle.requestPermission !== 'function') return st;
+    return await handle.requestPermission({ mode: 'readwrite' });
+  } catch (e) { return 'granted'; }
+}
+
+// 项目根目录 → docs 目录；如果用户直接选的就是 docs 本身，也认
+async function docsDirOf(root) {
+  if (root.name === 'docs') return root;
+  return await root.getDirectoryHandle(SITE_DIR, { create: true });
+}
+
+// 选错文件夹时给一次提醒（项目根目录里应该有 index.html / app.js）
+async function looksLikeProjectRoot(h) {
+  for (const f of ['index.html', 'app.js']) {
+    try { await h.getFileHandle(f); return true; } catch (e) { /* 继续试 */ }
+  }
+  return false;
+}
+async function confirmPickedRoot(root) {
+  if (root.name === 'docs') return;
+  if (await looksLikeProjectRoot(root)) return;
+  const ok = confirm(`「${root.name}」里没看到 index.html / app.js，看起来不是猫咪头像墙的项目文件夹。\n\n照片会被写进 ${root.name}/docs/，确定继续吗？`);
+  if (!ok) throw new DOMException('用户取消了', 'AbortError');
+}
+
+// 拿到一个能写的项目根目录句柄；需要时（用户手势里）弹选择框
+async function pickPubDir() {
+  const h = await window.showDirectoryPicker({ id: 'catsmap-root', mode: 'readwrite' });
+  await confirmPickedRoot(h);
+  await savePubDir(h);
+  return h;
+}
+async function currentPubDir(request) {
+  const saved = await readPubDir();
+  if (saved && (await askPermission(saved, request)) === 'granted') return saved;
+  if (saved && !request) return null;      // 需要授权但这次不能弹框 → 交给外层去弹
+  return await pickPubDir();
+}
+
+// 把 buildSiteFiles 的产物按目录结构写进 docs/
+async function writeSiteFiles(docs, files) {
+  let n = 0;
+  for (const f of files) {
+    const parts = f.path.split('/');
+    const fname = parts.pop();
+    let dir = docs;
+    for (const p of parts) dir = await dir.getDirectoryHandle(p, { create: true });
+    const fh = await dir.getFileHandle(fname, { create: true });
+    const w = await fh.createWritable();
+    await w.write(f.data);
+    await w.close();
+    n++;
+    if (n % 5 === 0) toast(`正在写入 docs/ … ${n} / ${files.length}`);
+  }
+  return n;
+}
+
+function openVisitorPage() {
+  if (!/^https?:$/.test(location.protocol)) return toast('要用本地服务器打开工作台才能直接预览访客页');
+  window.open(`${SITE_DIR}/index.html`, '_blank');
+}
+
+// 兜底：浏览器不支持直接写文件夹时，下载一个同样内容的 zip
+function downloadSiteZip(files) {
+  const zip = zipStore(files.map((f) => ({ name: `${SITE_DIR}/${f.path}`, data: f.data })));
   const a = document.createElement('a');
   a.href = URL.createObjectURL(zip);
   a.download = `猫咪头像墙-发布包-${todayISO()}.zip`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 8000);
-  toast(`发布包已保存到下载文件夹（${src.length} 张照片${watermark ? '，已加水印' : '，无水印'}）`, { label: '知道了', ms: 6000 });
+}
+
+async function publishSite(watermark) {
+  const src = (demoActive ? (demoSnapshot || []) : photos).filter((p) => !p.demo && p._bitmap);
+  if (!src.length) return toast('还没有照片可以发布');
+
+  // 选文件夹放在最前面：这属于用户手势里的动作，等渲染完再弹框浏览器会拦
+  let root = null;
+  if (canWriteDir()) {
+    try {
+      root = await currentPubDir(true);
+    } catch (e) {
+      if (e && e.name === 'AbortError') return toast('已取消发布');
+      console.warn('拿不到文件夹，改用 zip', e);
+      root = null;
+    }
+  }
+  if (!root) return publishSiteAsZip(watermark, '这个浏览器不支持直接写文件夹');
+
+  let built;
+  try { built = await buildSiteFiles(watermark); }
+  catch (e) { console.error(e); return toast('发布失败：' + e.message); }
+  if (!built) return toast('没有可发布的照片（示例照片不会发布）');
+
+  try {
+    const docs = await docsDirOf(root);
+    await writeSiteFiles(docs, built.files);
+    const where = root.name === 'docs' ? 'docs/' : `${root.name}/docs/`;
+    toast(`已写进 ${where}（${built.count} 张照片${watermark ? '，带水印' : ''}）`,
+      { label: '看看访客页', fn: openVisitorPage, ms: 9000 });
+    return;
+  } catch (e) {
+    console.warn('写入文件夹失败，改成下载 zip', e);
+    downloadSiteZip(built.files);
+    toast(`写不进文件夹（${e.message || e.name}），已改成下载发布包`);
+  }
+}
+
+// 不支持的浏览器兜底：下载一个同样内容的 zip（外面套好 docs/ 目录结构）
+async function publishSiteAsZip(watermark, why) {
+  let built;
+  try { built = await buildSiteFiles(watermark); }
+  catch (e) { console.error(e); return toast('发布失败：' + e.message); }
+  if (!built) return toast('没有可发布的照片（示例照片不会发布）');
+  downloadSiteZip(built.files);
+  toast(`${why}，已改成下载发布包（解压到项目根目录，${built.count} 张照片${watermark ? '，已加水印' : ''}）`, { ms: 7000 });
 }
 
 /* ---------- 发布面板 ---------- */
@@ -1488,6 +1642,7 @@ function openPublishModal() {
   $('pubCount').textContent = `${n} 张照片`;
   $('pubCatCount').textContent = `${siteCatCount()} 只喵星人`;
   drawWmPreview();
+  refreshPubDirHint();
   $('publishModal').classList.add('show');
   document.body.classList.add('moving');
 }
@@ -1496,11 +1651,38 @@ function closePublishModal() {
   document.body.classList.remove('moving');
 }
 
+// 面板里那行「文件夹」说明：没选过 → 提示会弹选择框；选过了 → 显示写到哪儿
+async function refreshPubDirHint() {
+  const txt = $('pubDirTxt'), btn = $('pubDirChange');
+  if (!canWriteDir()) {
+    txt.textContent = '这个浏览器不支持直接写文件夹，发布会下载一个 zip 包（解压到项目根目录）。';
+    btn.hidden = true;
+    return;
+  }
+  const h = await readPubDir();
+  if (h) {
+    txt.innerHTML = `发布直接写进 <b>${escapeAttr(h.name)}</b> 里的 <code>docs/</code>，不用解压。`;
+    btn.hidden = false;
+  } else {
+    txt.textContent = '第一次发布会让你选一次项目文件夹（有 index.html 的那个），以后每次都直接用。';
+    btn.hidden = true;
+  }
+}
+
 $('publishBtn').addEventListener('click', openPublishModal);
 $('pubCancel').addEventListener('click', closePublishModal);
 $('publishModal').addEventListener('click', (e) => { if (e.target === $('publishModal')) closePublishModal(); });
 $('pubWatermark').addEventListener('change', () => {
   $('wmPreview').style.opacity = $('pubWatermark').checked ? '1' : '.28';
+});
+$('pubDirChange').addEventListener('click', async () => {
+  try {
+    await pickPubDir();
+    toast('好，以后发布会写进这个文件夹');
+    refreshPubDirHint();
+  } catch (e) {
+    if (!e || e.name !== 'AbortError') toast('没能选定文件夹：' + (e.message || e.name));
+  }
 });
 $('pubGo').addEventListener('click', async () => {
   const wm = $('pubWatermark').checked;

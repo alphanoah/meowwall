@@ -5,6 +5,7 @@
    · 照片清单来自同目录的 photos.json（由工作台「发布到网站」生成）
    · 拼贴核心与工作台 app.js 的对应段落保持一致（改一边记得同步另一边）
    · 发布出来的照片已经是裁剪成品，所以这里不需要裁剪/旋转参数
+   · 访客点「下载这张」拿到的整张图会盖一层水印（页面上的显示保持干净）
    ========================================================= */
 
 /* ---------- 猫头轮廓（唯一真源，与工作台的 logo 一致） ---------- */
@@ -393,6 +394,65 @@ function pawSvg() {
 }
 
 /* =========================================================
+   水印（与工作台 app.js 里的同名函数保持一致，改一边记得同步另一边）
+   ========================================================= */
+const WM_TEXT = 'Theo';
+
+// 一个小猫爪：掌垫 + 四个趾垫（以 (x,y) 为中心，s 为整体宽度）
+function pawAt(cx, x, y, s) {
+  const r = s / 2;
+  cx.beginPath();
+  cx.ellipse(x, y + r * 0.44, r * 0.60, r * 0.50, 0, 0, Math.PI * 2);
+  cx.ellipse(x - r * 0.60, y - r * 0.26, r * 0.20, r * 0.26, 0, 0, Math.PI * 2);
+  cx.ellipse(x - r * 0.21, y - r * 0.50, r * 0.20, r * 0.27, 0, 0, Math.PI * 2);
+  cx.ellipse(x + r * 0.21, y - r * 0.50, r * 0.20, r * 0.27, 0, 0, Math.PI * 2);
+  cx.ellipse(x + r * 0.60, y - r * 0.26, r * 0.20, r * 0.26, 0, 0, Math.PI * 2);
+  cx.fill();
+  cx.stroke();
+}
+
+// 对角密排铺满整张图：每个单元 = 小猫爪 + 「Theo」
+function drawWatermark(cx, w, h) {
+  const span = Math.hypot(w, h);
+  const unit = Math.max(96, Math.round(Math.min(w, h) * 0.40));   // 单元间距
+  const fs = Math.max(11, Math.round(unit * 0.26));               // 文字大小
+  const paw = fs * 1.15;
+  cx.save();
+  cx.translate(w / 2, h / 2);
+  cx.rotate(-Math.PI / 5);
+  cx.textAlign = 'center';
+  cx.textBaseline = 'middle';
+  cx.font = `700 ${fs}px system-ui,-apple-system,"PingFang SC",sans-serif`;
+  cx.fillStyle = 'rgba(255,255,255,.22)';
+  cx.strokeStyle = 'rgba(58,42,32,.13)';
+  cx.lineWidth = Math.max(1, fs * 0.07);
+  cx.lineJoin = 'round';
+  let row = 0;
+  for (let y = -span / 2; y <= span / 2; y += unit, row++) {
+    const offset = (row % 2) * (unit / 2);                        // 交错排列更均匀
+    for (let x = -span / 2; x <= span / 2; x += unit) {
+      const px = x + offset;
+      pawAt(cx, px, y - fs * 0.62, paw);
+      cx.strokeText(WM_TEXT, px, y + fs * 0.72);
+      cx.fillText(WM_TEXT, px, y + fs * 0.72);
+    }
+  }
+  cx.restore();
+}
+
+/* 下载用的画布：整张都盖上水印（不裁猫头轮廓）。
+   猫头外的透明区也会铺上，所以不管怎么裁都还留着出处。 */
+function watermarkedCanvas() {
+  const c = document.createElement('canvas');
+  c.width = canvas.width;
+  c.height = canvas.height;
+  const cx = c.getContext('2d');
+  cx.drawImage(canvas, 0, 0);
+  drawWatermark(cx, c.width, c.height);
+  return c;
+}
+
+/* =========================================================
    控件
    ========================================================= */
 function syncMode() {
@@ -416,7 +476,8 @@ function bind() {
     render();
   });
   $('download').addEventListener('click', () => {
-    canvas.toBlob((b) => {
+    // 下载的是「整张都带水印」的那版；屏幕上显示的拼贴保持干净
+    watermarkedCanvas().toBlob((b) => {
       const a = document.createElement('a');
       const d = new Date();
       const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
