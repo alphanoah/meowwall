@@ -8,3 +8,6 @@
 # 本地测试环境（puppeteer 等，不入库）
 .workbuddy/testenv/
 .workbuddy/tmp-*.png
+
+# 本地密钥（GitHub 令牌等，绝不入库）
+.workbuddy/.secrets/
