@@ -1276,6 +1276,22 @@ async function inflateRaw(u8) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
+/* 条目名归一化：反斜杠转正斜杠、去掉 ./ 前缀和开头的 /，便于跨工具比对 */
+function zipNorm(name) {
+  return String(name || '').replace(/\\/g, '/').replace(/^\.\/+/, '').replace(/^\/+/, '').trim();
+}
+function zipBase(name) {
+  const s = zipNorm(name);
+  const i = s.lastIndexOf('/');
+  return i < 0 ? s : s.slice(i + 1);
+}
+/* 重新压缩时常被带进来的垃圾条目：macOS 的 __MACOSX/._xxx（AppleDouble）、.DS_Store */
+function zipJunk(name) {
+  const s = zipNorm(name);
+  const b = zipBase(s);
+  return s.startsWith('__MACOSX/') || b === '.DS_Store' || b.startsWith('._') || b === 'Thumbs.db';
+}
+
 async function zipRead(u8) {
   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
   let eocd = -1;
@@ -1295,16 +1311,37 @@ async function zipRead(u8) {
     const extraLen = dv.getUint16(p + 30, true);
     const cmtLen = dv.getUint16(p + 32, true);
     const lfhOff = dv.getUint32(p + 42, true);
-    const name = dec.decode(u8.subarray(p + 46, p + 46 + nameLen));
+    const name = zipNorm(dec.decode(u8.subarray(p + 46, p + 46 + nameLen)));
     if (method !== 0 && method !== 8) throw new Error(`暂不支持的压缩方式（${method}）：${name}`);
     const lNameLen = dv.getUint16(lfhOff + 26, true);
     const lExtraLen = dv.getUint16(lfhOff + 28, true);
     const start = lfhOff + 30 + lNameLen + lExtraLen;
     const data = u8.subarray(start, start + compSize);
-    out.set(name, method === 0 ? data : await inflateRaw(data));
+    // 目录条目、打包附带的元数据条目一律忽略（解压后重新压缩常会带来这些）
+    if (name && !name.endsWith('/') && !zipJunk(name) && !out.has(name)) {
+      out.set(name, method === 0 ? data : await inflateRaw(data));
+    }
     p += 46 + nameLen + extraLen + cmtLen;
   }
   return out;
+}
+
+/* 在包里找一个文件：容忍「解压后再压缩」带来的差异——
+   多套一层外层文件夹、路径分隔符不同、大小写不同。
+   先精确匹配，再按路径尾部匹配，最后只比文件名。 */
+function zipFind(entries, want) {
+  const w = zipNorm(want).toLowerCase();
+  if (!w) return null;
+  if (entries.has(zipNorm(want))) return entries.get(zipNorm(want));
+  const suffix = '/' + w;
+  const wb = zipBase(w);
+  let byName = null;
+  for (const [k, v] of entries) {
+    const lk = k.toLowerCase();
+    if (lk.endsWith(suffix)) return v;                    // 外层多了文件夹（如「备份名/photos/x.jpg」）
+    if (!byName && zipBase(lk) === wb) byName = v;        // 兜底：只比文件名
+  }
+  return byName;
 }
 
 async function importBackup(file) {
@@ -1358,12 +1395,14 @@ async function importBackup(file) {
 async function importBackupZip(file) {
   let entries;
   try { entries = await zipRead(new Uint8Array(await file.arrayBuffer())); }
-  catch (e) { return toast('这个文件不是有效的备份包'); }
-  if (!entries.has('manifest.json')) {
-    return toast('包里没有 manifest.json，不是本应用导出的备份包（自己压缩的照片包无法恢复记录，请用「导出备份」生成的包）');
+  catch (e) { return toast('这个包读不了（' + e.message + '）'); }
+  const rawMf = zipFind(entries, 'manifest.json');
+  if (!rawMf) {
+    const found = [...entries.keys()].slice(0, 4).join('、');
+    return toast(`包里没有 manifest.json（找到 ${entries.size} 个文件${found ? '：' + found : ''}），无法恢复记录；请用「导出备份」生成的包直接导入`);
   }
   let data;
-  try { data = JSON.parse(new TextDecoder().decode(entries.get('manifest.json'))); }
+  try { data = JSON.parse(new TextDecoder().decode(rawMf)); }
   catch (e) { return toast('备份包清单无法解析'); }
   if (!data || data.app !== 'catsmap' || !Array.isArray(data.photos)) {
     return toast('这个文件不是「猫咪头像墙」的备份');
@@ -1377,7 +1416,7 @@ async function importBackupZip(file) {
   let ok = 0;
   for (const it of items) {
     try {
-      const raw = entries.get(it.file) || entries.get(`photos/${it.file}`);
+      const raw = zipFind(entries, it.file) || zipFind(entries, `photos/${it.file}`);
       if (!raw) continue;
       const blob = new Blob([raw], { type: 'image/jpeg' });
       const rec = {

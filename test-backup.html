@@ -87,6 +87,38 @@ function runChecks(win, doc) {
       const tag = doc.getElementById('mosaicTag').textContent;
       chk(tag.includes('3 张照片'), '拼贴墙正常渲染', tag);
 
+      // 4) 解压后重新压缩的容错：外层多一层文件夹 / macOS 元数据 / ./ 前缀 / 反斜杠分隔符
+      const pack = [...entries.entries()].map(([name, data]) => ({ name, data }));
+      const junk = (n) => ({ name: n, data: new TextEncoder().encode('junk') });
+      const variants = [
+        ['外层多一层文件夹', pack.map((f) => ({ name: '猫咪头像墙备份-2026-09-23/' + f.name, data: f.data }))],
+        ['多一层文件夹 + macOS 元数据', [
+          ...pack.map((f) => ({ name: 'bak/' + f.name, data: f.data })),
+          junk('__MACOSX/._manifest.json'), junk('__MACOSX/bak/photos/._x.jpg'),
+          junk('.DS_Store'), junk('bak/.DS_Store')
+        ]],
+        ['./ 前缀', pack.map((f) => ({ name: './' + f.name, data: f.data }))],
+        ['反斜杠分隔符', pack.map((f) => ({ name: f.name.replace(/\//g, '\\'), data: f.data }))]
+      ];
+      for (const [label, files] of variants) {
+        const w2 = [];
+        const ow = win.console.warn;
+        win.console.warn = (...a) => w2.push(a.map(String).join(' '));
+        await win.importBackup(new File([win.zipStore(files)], 'x.zip', { type: 'application/zip' }));
+        await new Promise((r) => setTimeout(r, 900));
+        win.console.warn = ow;
+        const t = doc.getElementById('toast').textContent;
+        chk(t.includes('已恢复 3 张照片') && w2.length === 0,
+            '重新压缩后仍可导入：' + label, t + (w2.length ? ' / 警告 ' + w2.join(' | ') : ''));
+      }
+
+      // 5) 丢了 manifest.json 的照片包 → 明确提示（而不是笼统报错）
+      const noMf = pack.filter((f) => f.name !== 'manifest.json');
+      await win.importBackup(new File([win.zipStore(noMf)], 'p.zip', { type: 'application/zip' }));
+      await new Promise((r) => setTimeout(r, 600));
+      const tNoMf = doc.getElementById('toast').textContent;
+      chk(tNoMf.includes('manifest.json'), '缺 manifest 时给出明确提示', tNoMf);
+
       done(ok);
     } catch (e) {
       log('FAIL: 异常 ' + e.message);
