@@ -330,7 +330,9 @@ async function loadPhotos() {
       if (i >= total) return;
       const item = list[i];
       try {
-        const r = await fetch(item.file, { cache: 'force-cache' });
+        // no-cache：每次先向服务器确认有没有更新（没变就 304，依然很快）。
+        // 不能用 force-cache —— 图片重新发布后浏览器会一直用旧缓存。
+        const r = await fetch(item.file, { cache: 'no-cache' });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const bmp = await decodeBlob(await r.blob());
         slots[i] = { file: item.file, name: item.name || '', _bitmap: bmp };
