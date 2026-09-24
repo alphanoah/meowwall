@@ -56,7 +56,7 @@ function runChecks(win, doc) {
       const u8 = new Uint8Array(await built.blob.arrayBuffer());
 
       // 2) 包内容校验
-      const entries = win.zipRead(u8);
+      const entries = await win.zipRead(u8);
       const names = [...entries.keys()].sort();
       chk(names.length === 4 && names.filter((n) => n.startsWith('photos/')).length === 3 && names.includes('manifest.json'),
           '包内 3 张原图 + manifest.json', names.join(','));

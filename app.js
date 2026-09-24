@@ -527,27 +527,17 @@ function catNameOf(p) { return (p.name || '').trim() || '未命名猫咪'; }
    · 组内合照排最后，其余保持现有顺序（新照片在前）
    · 组间排序见 sortGroups（默认编号从大到小，可切日期序） */
 /* 组间排序，两种模式（记忆在 localStorage）：
-   · pid-desc（默认）：编号从大到小（编号最大的订单 = 最新，排最前）；没编号的排最后
-   · date：按组内最近的探访日期从新到旧 */
+   · pid-desc（默认）：编号从大到小（编号最大的订单 = 最新）
+   · pid-asc：编号从小到大
+   两种模式下，没有编号的照片（刚上传、还没归组的）都排最前面。 */
 function sortGroups(list) {
   const mode = localStorage.getItem('catsmap.sort') || 'pid-desc';
-  if (mode === 'date') {
-    const gkey = (g) => {
-      let d = ''; let t = 0;
-      for (const m of g.members) {
-        if ((m.date || '') > d) d = m.date || '';
-        t = Math.max(t, m.createdAt || 0);
-      }
-      return `${d}|${String(t).padStart(15, '0')}`;
-    };
-    list.sort((a, b) => (gkey(a) < gkey(b) ? 1 : gkey(a) > gkey(b) ? -1 : 0));
-  } else {
-    list.sort((a, b) => {
-      if (a.pid && b.pid) return b.pid.localeCompare(a.pid, undefined, { numeric: true });
-      if (a.pid !== b.pid) return a.pid ? -1 : 1;
-      return (b.members[0].createdAt || 0) - (a.members[0].createdAt || 0);
-    });
-  }
+  const dir = mode === 'pid-asc' ? 1 : -1;
+  const anon = [], withPid = [];
+  for (const g of list) (g.pid ? withPid : anon).push(g);
+  anon.sort((a, b) => (b.members[0].createdAt || 0) - (a.members[0].createdAt || 0));
+  withPid.sort((a, b) => dir * a.pid.localeCompare(b.pid, undefined, { numeric: true }));
+  return [...anon, ...withPid];
 }
 
 function groupPhotos() {
@@ -562,8 +552,7 @@ function groupPhotos() {
   for (const g of list) {
     g.members.sort((a, b) => (isGroupName(a.name) ? 1 : 0) - (isGroupName(b.name) ? 1 : 0)); // 稳定排序，合照挪到最后
   }
-  sortGroups(list);
-  return list;
+  return sortGroups(list);
 }
 
 function renderList() {
@@ -572,7 +561,7 @@ function renderList() {
   $('listEmpty').style.display = photos.length ? 'none' : 'block';
   $('listCount').textContent = photos.length;
   const sb = $('sortBtn');
-  if (sb) sb.textContent = (localStorage.getItem('catsmap.sort') || 'pid-desc') === 'date' ? '按日期 ↓' : '按编号 ↓';
+  if (sb) sb.textContent = (localStorage.getItem('catsmap.sort') || 'pid-desc') === 'pid-asc' ? '按编号 ↑' : '按编号 ↓';
 
   for (const g of groupPhotos()) {
     const sec = document.createElement('section');
@@ -694,6 +683,14 @@ $('photoList').addEventListener('change', (e) => {
 
   if (k === 'pid') {
     const v = gInput.value.trim().replace(/\D/g, '');   // 编号只留数字
+    const oldPid = String(members[0].pid ?? '').trim();
+    if (v && v !== oldPid) {
+      const existing = photos.filter((p) => !members.includes(p) && pidOf(p) === v);
+      if (existing.length) {
+        const go = confirm(`编号 ${v} 已存在（${existing.length} 张照片）。\n确认修改会把当前这 ${members.length} 张照片全部并入编号 ${v} 的组。`);
+        if (!go) { gInput.value = oldPid; return; }     // 取消 → 恢复原编号
+      }
+    }
     gInput.value = v;
     for (const rec of members) rec.pid = v;             // 名字保持纯名，编号只进 pid
     renderList();                              // 重新归组排序
@@ -1268,9 +1265,18 @@ async function exportBackup() {
   toast(`备份已保存到下载文件夹（${built.count} 张照片）`);
 }
 
-/* 只解析自家备份包（STORE 无压缩）的 zip：读中央目录取文件名和数据。
-   自产自销用，不做通用解压器（不支持 DEFLATE/分卷/zip64）。 */
-function zipRead(u8) {
+/* 解析备份包 zip：读中央目录取文件名和数据。
+   · method 0（STORE，本应用导出的格式）直接取原始数据
+   · method 8（DEFLATE，常见压缩软件的默认格式）用 DecompressionStream 解压
+     —— 这样用户自己压缩的照片包也能读出图片（但仍需 manifest.json 才能恢复记录）
+   不支持分卷/zip64/加密。 */
+async function inflateRaw(u8) {
+  const ds = new DecompressionStream('deflate-raw');
+  const stream = new Blob([u8]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function zipRead(u8) {
   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
   let eocd = -1;
   for (let i = u8.length - 22; i >= Math.max(0, u8.length - 22 - 65536); i--) {
@@ -1290,11 +1296,12 @@ function zipRead(u8) {
     const cmtLen = dv.getUint16(p + 32, true);
     const lfhOff = dv.getUint32(p + 42, true);
     const name = dec.decode(u8.subarray(p + 46, p + 46 + nameLen));
-    if (method !== 0) throw new Error(`包内有压缩数据，不是本应用生成的备份：${name}`);
+    if (method !== 0 && method !== 8) throw new Error(`暂不支持的压缩方式（${method}）：${name}`);
     const lNameLen = dv.getUint16(lfhOff + 26, true);
     const lExtraLen = dv.getUint16(lfhOff + 28, true);
     const start = lfhOff + 30 + lNameLen + lExtraLen;
-    out.set(name, u8.subarray(start, start + compSize));
+    const data = u8.subarray(start, start + compSize);
+    out.set(name, method === 0 ? data : await inflateRaw(data));
     p += 46 + nameLen + extraLen + cmtLen;
   }
   return out;
@@ -1350,8 +1357,11 @@ async function importBackup(file) {
 /* 新版 ZIP 备份导入：photos/*.jpg 原图 + manifest.json 元数据（缩略图重新生成） */
 async function importBackupZip(file) {
   let entries;
-  try { entries = zipRead(new Uint8Array(await file.arrayBuffer())); }
+  try { entries = await zipRead(new Uint8Array(await file.arrayBuffer())); }
   catch (e) { return toast('这个文件不是有效的备份包'); }
+  if (!entries.has('manifest.json')) {
+    return toast('包里没有 manifest.json，不是本应用导出的备份包（自己压缩的照片包无法恢复记录，请用「导出备份」生成的包）');
+  }
   let data;
   try { data = JSON.parse(new TextDecoder().decode(entries.get('manifest.json'))); }
   catch (e) { return toast('备份包清单无法解析'); }
@@ -1374,12 +1384,14 @@ async function importBackupZip(file) {
         id: it.id || uid(), name: it.name || '', pid: it.pid || idOf(it.name || '') || '',
         date: it.date || todayISO(),
         place: it.place || '', note: it.note || '',
+        blob,                                   // 关键：原图必须存进记录，否则入库的是空壳
         w: it.w || 0, h: it.h || 0, createdAt: it.createdAt || Date.now(),
         crop: it.crop || null
       };
       stripNameSuffix(rec);                    // manifest 里的旧名字可能带 (id)，拆成纯名 + pid
       rec._bitmap = await decodeFile(blob);
       const thumb = (await resizeToBlob(rec._bitmap, THUMB_SIZE, 0.78)).blob;
+      rec.thumb = thumb;
       rec._thumbUrl = URL.createObjectURL(thumb);
       rec.w = rec.w || rec._bitmap.width;      // 旧备份若没存尺寸，用解码结果补上
       rec.h = rec.h || rec._bitmap.height;
@@ -1650,7 +1662,7 @@ $('demoBtn').addEventListener('click', () => enterDemo(14));
 $('demoExit').addEventListener('click', exitDemo);
 $('exportBtn').addEventListener('click', exportBackup);
 $('sortBtn').addEventListener('click', () => {
-  const next = (localStorage.getItem('catsmap.sort') || 'pid-desc') === 'date' ? 'pid-desc' : 'date';
+  const next = (localStorage.getItem('catsmap.sort') || 'pid-desc') === 'pid-asc' ? 'pid-desc' : 'pid-asc';
   localStorage.setItem('catsmap.sort', next);
   renderList();
 });
@@ -1798,7 +1810,7 @@ $('clearAll').addEventListener('click', async () => {
         r._bitmap = await decodeFile(r.blob);
         r._thumbUrl = URL.createObjectURL(r.thumb || r.blob);
         prepareSrc(r);
-      } catch (e) { continue; }
+      } catch (e) { console.warn('一条记录加载失败，已跳过（id=' + r.id + '）', e); continue; }
       loaded.push(r);
     }
     if (demoActive) { demoSnapshot = loaded; return; }  // 加载期间用户进了示例，先存快照，退出时再显示

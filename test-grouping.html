@@ -73,11 +73,11 @@ function runChecks(win, doc) {
   const groups = qa('.group-card');
   chk(groups.length === 3, '5 张照片分成 3 组', groups.length);
 
-  // 编号从大到小：91 在前，90 在后，未编号最后
-  const g91 = groups[0], g90 = groups[1], gAnon = groups[2];
+  // 无编号照片排最前，编号组从大到小：未命名 → 91 → 90
+  const gAnon = groups[0], g91 = groups[1], g90 = groups[2];
+  chk(q('.f-pid', gAnon).value === '', '无编号照片排最前、单独一组', qa('.f-pid').map(i => i.value).join(','));
   chk(q('.f-pid', g91).value === '91' && q('.f-pid', g90).value === '90',
-      '默认编号从大到小 91 → 90', qa('.f-pid').map(i => i.value).join(','));
-  chk(q('.f-pid', gAnon).value === '', '未命名照片单独一组、编号为空');
+      '编号组从大到小 91 → 90', qa('.f-pid').map(i => i.value).join(','));
 
   const names90 = qa('.card .f-name', g90).map(i => i.value);
   chk(names90.length === 3 &&
@@ -97,24 +97,26 @@ function runChecks(win, doc) {
   setVal(q('[data-gk="place"]', g90), 'C栋501');
   chk(q('[data-gk="place"]', g90).value === 'C栋501', '组头改地址整组生效');
 
-  // 组头改 pid → 重新归组；名字保持纯名不受影响。编号 8 < 91，按数字降序排在 91 之后
+  // 组头改 pid → 重新归组；名字保持纯名不受影响。编号 8 < 91，降序时排在 91 之后（无编号组仍最前）
   setVal(q('.f-pid', g90), '8');
   let gs = qa('.group-card');
-  chk(gs.length === 3 && q('.f-pid', gs[1]).value === '8', '改 pid 后重新归组、按数字降序 91→8', qa('.f-pid').map(i => i.value).join(','));
-  const names8 = qa('.card .f-name', gs[1]).map(i => i.value);
+  chk(gs.length === 3 && q('.f-pid', gs[2]).value === '8', '改 pid 后重新归组，序为 无编号→91→8', qa('.f-pid').map(i => i.value).join(','));
+  const names8 = qa('.card .f-name', gs[2]).map(i => i.value);
   chk(names8.join('/') === '奶牛/咪咪/合照', '改 pid 后名字保持纯名不变', names8.join('/'));
-  chk(q('[data-gk="place"]', gs[1]).value === 'C栋501', '归组后地址保留');
+  chk(q('[data-gk="place"]', gs[2]).value === 'C栋501', '归组后地址保留');
 
   // 编号框输入混入非数字 → 只留数字（每次重渲染后都要重新查询节点）
-  const pidBox = qa('.f-pid')[0];
+  const pidBox = qa('.f-pid')[1];
   setVal(pidBox, '9a1b');
-  chk(qa('.f-pid')[0].value === '91', '编号框剔除非数字字符', qa('.f-pid')[0].value);
+  chk(qa('.f-pid')[1].value === '91', '编号框剔除非数字字符', qa('.f-pid')[1].value);
 
-  // 给未命名照片补编号 8 → 并入 8 组（仍是 3 组：91 / 8 / 无）
-  setVal(qa('.f-pid')[2], '8');
+  // 给无编号照片补编号 8 → 并入 8 组（编号已存在会弹确认，这里放行）
+  const origConfirm = win.confirm;
+  win.confirm = () => true;
+  setVal(qa('.f-pid')[0], '8');
   gs = qa('.group-card');
   chk(gs.length === 2 && q('.f-pid', gs[0]).value === '91' && q('.f-pid', gs[1]).value === '8' && qa('.card', gs[1]).length === 4,
-      '未命名照片补编号 8 后并入该组', gs.length + ' 组 / pids ' + qa('.f-pid').map(i => i.value).join(',') + ' / 首组 ' + qa('.card', gs[0]).length + ' 张');
+      '无编号照片补编号 8 后并入该组', gs.length + ' 组 / pids ' + qa('.f-pid').map(i => i.value).join(',') + ' / 8组 ' + qa('.card', gs[1]).length + ' 张');
 
   // 改组内名字 → 不再影响 pid
   const nameInput = qa('.card .f-name', gs[1])[0];
@@ -124,15 +126,25 @@ function runChecks(win, doc) {
   chk(qa('.card .f-name', gs[1])[0].value === '奶牛(大)' && q('.f-pid', gs[1]).value === '8',
       '名字带括号不再联动编号', qa('.card .f-name', gs[1]).map((i) => i.value).join('/'));
 
-  // 排序切换：按日期（改 91 组日期更早 → 编号序 8 最前；日期序 8 组仍是最新）
+  // 排序切换：降序 ↔ 升序（无编号组不存在了，8 组应从后变前）
   const sortBtn = doc.getElementById('sortBtn');
-  chk(!!sortBtn && sortBtn.textContent.includes('编号'), '排序按钮存在且显示编号序', sortBtn && sortBtn.textContent);
+  chk(!!sortBtn && sortBtn.textContent.includes('↓'), '排序按钮显示降序', sortBtn && sortBtn.textContent);
   sortBtn.click();
-  chk(sortBtn.textContent.includes('日期'), '切换到日期序', sortBtn.textContent);
-  const groupsByDate = qa('.group-card');
-  chk(q('.f-pid', groupsByDate[0]).value === '8', '日期序：今天日期的组在前', qa('.f-pid').map(i => i.value).join(','));
+  chk(sortBtn.textContent.includes('↑'), '切换到升序', sortBtn.textContent);
+  chk(qa('.f-pid').map((i) => i.value).join(',') === '8,91', '升序：8 → 91', qa('.f-pid').map((i) => i.value).join(','));
   sortBtn.click();
-  chk(sortBtn.textContent.includes('编号'), '切回编号序', sortBtn.textContent);
+  chk(sortBtn.textContent.includes('↓') && qa('.f-pid').map((i) => i.value).join(',') === '91,8',
+      '切回降序：91 → 8', qa('.f-pid').map((i) => i.value).join(','));
+
+  // 改编号到已存在的编号 → 弹确认；取消则原编号不变
+  win.confirm = () => false;
+  setVal(qa('.f-pid')[0], '8');
+  chk(qa('.f-pid').map((i) => i.value).join(',') === '91,8', '目标编号已存在 + 取消确认 → 编号不变', qa('.f-pid').map((i) => i.value).join(','));
+  win.confirm = () => true;
+  setVal(qa('.f-pid')[0], '8');
+  win.confirm = origConfirm;
+  chk(qa('.group-card').length === 1 && qa('.card', qa('.group-card')[0]).length === 5,
+      '确认后 91 组并入 8 组', qa('.group-card').length + ' 组');
 
   // 收尾：关掉上传后自动弹出的裁剪队列，方便截图看列表
   const keepBtn = [...doc.querySelectorAll('button')].find((b) => b.textContent.includes('全部保持原样'));
