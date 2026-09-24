@@ -1,0 +1,438 @@
+/* =========================================================
+   喵星人头像墙 · 访客页
+   只做一件事：把 meowtonians/ 里的照片拼成一个大猫头。
+
+   · 照片清单来自同目录的 photos.json（由工作台「发布到网站」生成）
+   · 拼贴核心与工作台 app.js 的对应段落保持一致（改一边记得同步另一边）
+   · 发布出来的照片已经是裁剪成品，所以这里不需要裁剪/旋转参数
+   ========================================================= */
+
+/* ---------- 猫头轮廓（唯一真源，与工作台的 logo 一致） ---------- */
+const CAT_PATH = "M500 872 C356 872 176 748 172 572 C169 498 190 418 208 352 L148 92 C143 74 158 58 176 66 L372 158 C414 140 456 131 500 131 C544 131 586 140 628 158 L824 66 C842 58 857 74 852 92 L792 352 C810 418 831 498 828 572 C824 748 644 872 500 872 Z";
+
+const VW = 1000;              // 逻辑坐标宽
+const VH = 900;               // 逻辑坐标高
+const SCALE = 1400 / VW;      // canvas 实际像素倍率
+
+const WHISKERS = [
+  [215, 560, 62, 520], [208, 610, 46, 600], [215, 658, 62, 692],
+  [785, 560, 938, 520], [792, 610, 954, 600], [785, 658, 938, 692]
+];
+
+const MIN_COLS = 5, MAX_COLS = 22;
+
+/* ---------- 状态 ---------- */
+let photos = [];              // { file, name, _bitmap }
+let meta = null;
+let seed = 7;
+let layoutMode = 'grid';      // 访客页默认「几 × 几 铺满」
+let ready = false;
+
+/* ---------- DOM ---------- */
+const $ = (id) => document.getElementById(id);
+const canvas = $('mosaic');
+const ctx = canvas.getContext('2d');
+const catPath2D = new Path2D(CAT_PATH);
+
+/* ---------- 随机 ---------- */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function shuffleWithSeed(arr, s) {
+  const rnd = mulberry32(s);
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/* =========================================================
+   版面计算
+   ========================================================= */
+
+// 均分切分：把整块猫头按张数递归二分，每张照片面积相等（照片少时最自然）
+function sliceRects(n) {
+  if (n <= 1) return [{ x: 0, y: 0, w: VW, h: VH }];
+  const out = [];
+  (function split(rect, count) {
+    if (count <= 1) { out.push(rect); return; }
+    const first = Math.ceil(count / 2);
+    if (rect.w >= rect.h) {
+      const w1 = rect.w * first / count;
+      split({ x: rect.x, y: rect.y, w: w1, h: rect.h }, first);
+      split({ x: rect.x + w1, y: rect.y, w: rect.w - w1, h: rect.h }, count - first);
+    } else {
+      const h1 = rect.h * first / count;
+      split({ x: rect.x, y: rect.y, w: rect.w, h: h1 }, first);
+      split({ x: rect.x, y: rect.y + h1, w: rect.w, h: rect.h - h1 }, count - first);
+    }
+  })({ x: 0, y: 0, w: VW, h: VH }, n);
+  return out;
+}
+
+// 规则网格
+function gridRects(cols, rows) {
+  const tw = VW / cols, th = VH / rows;
+  const out = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) out.push({ x: c * tw, y: r * th, w: tw, h: th });
+  }
+  return out;
+}
+
+// 按照片数挑一个「浪费格子最少、格子又不至于太扁长」的网格
+function autoGrid(n) {
+  if (n <= 1) return { cols: 1, rows: 1 };
+  let best = null;
+  let fallback = null;
+  for (let c = 1; c <= n; c++) {
+    const r = Math.ceil(n / c);
+    const waste = c * r - n;
+    const ar = (VW / c) / (VH / r);
+    const cand = { cols: c, rows: r, waste, ar, score: Math.abs(Math.log(ar)) };
+    if (!fallback || cand.score < fallback.score) fallback = cand;
+    if (ar >= 0.5 && ar <= 2) {
+      if (!best || cand.waste < best.waste ||
+          (cand.waste === best.waste && cand.score < best.score)) best = cand;
+    }
+  }
+  return best || fallback;
+}
+
+/* ---------- 主体格优先填充 ----------
+   格子从画布左上角按行生成，而猫头在画布中间：直接按行填充会让
+   每张照片的第一份落在头顶/耳朵的边缘格里。这里用轮廓路径
+   isPointInPath 对每格 9×9 采样算覆盖率（按列数缓存），填充顺序改为
+   完整格（覆盖率 ≥95%）在前、按阅读顺序，边缘格在后用重复照片补满。 */
+const _coverCache = new Map(); // cols -> 每格覆盖率数组（行优先）
+
+function cellCoverages(cols, rows) {
+  if (_coverCache.has(cols)) return _coverCache.get(cols);
+  const tw = VW / cols, th = VH / rows;
+  const out = [];
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      let inside = 0;
+      for (let sy = 0; sy < 9; sy++) {
+        const py = r * th + (th * (sy + 0.5)) / 9;
+        for (let sx = 0; sx < 9; sx++) {
+          const px = c * tw + (tw * (sx + 0.5)) / 9;
+          if (ctx.isPointInPath(catPath2D, px, py)) inside++;
+        }
+      }
+      out.push(inside / 81);
+    }
+  }
+  ctx.restore();
+  _coverCache.set(cols, out);
+  return out;
+}
+
+// 主体格优先的格子顺序：完整格在前（保持阅读顺序），边缘格在后
+function mainFirstRects(cols, rows) {
+  const rects = gridRects(cols, rows);
+  const cov = cellCoverages(cols, rows);
+  return rects
+    .map((_, i) => i)
+    .sort((a, b) => (cov[b] >= 0.95) - (cov[a] >= 0.95) || a - b)
+    .map((i) => rects[i]);
+}
+
+/* ---------- 每档列数的完整格数（与工作台实测值一致） ---------- */
+const MAIN_CELLS = [9, 10, 13, 20, 28, 34, 41, 48, 61, 72, 89, 98, 114, 128, 146, 156, 169, 188]; // 5~22 列
+
+const mainCellsOf = (cols) =>
+  MAIN_CELLS[Math.max(0, Math.min(MAIN_CELLS.length - 1, Math.round(cols) - 5))] || 0;
+
+const gridRowsOf = (cols) => Math.ceil(VH / (VW / cols));
+
+// 建议列数 = 「完整格数 ≥ 照片数」的最小列数（格子能多大就多大）
+function suggestCols(n) {
+  for (let c = MIN_COLS; c <= MAX_COLS; c++) if (MAIN_CELLS[c - MIN_COLS] >= n) return c;
+  return MAX_COLS;
+}
+
+/* =========================================================
+   绘制
+   ========================================================= */
+
+// 发布出来的图已是成品，等比铺满整格并居中裁切
+function drawCover(cx, rec, x, y, w, h) {
+  const img = rec._bitmap;
+  if (!img) return;
+  const iw = img.width || img.naturalWidth || 0;
+  const ih = img.height || img.naturalHeight || 0;
+  if (!iw || !ih) return;
+  const k = Math.max(w / iw, h / ih);
+  const dw = iw * k, dh = ih * k;
+  cx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+}
+
+function render() {
+  const gap = Number($('gap').value);
+  const showWhiskers = $('whiskers').checked;
+  const loaded = photos.filter((p) => p._bitmap);
+  const n = loaded.length;
+
+  let rects = [];
+  let note = '';
+  const cols = Number($('density').value);
+  const gridRows = gridRowsOf(cols);
+  $('densityVal').textContent = `${cols} × ${gridRows}`;
+  $('gapVal').textContent = gap;
+
+  if (!n) {
+    note = '正在加载照片…';
+  } else if (layoutMode === 'grid') {
+    rects = mainFirstRects(cols, gridRows);
+    const main = mainCellsOf(cols);
+    note = `${n} 张照片铺成 ${cols} × ${gridRows}；其中 ${main} 格落在猫头主体内`;
+  } else if (n === 1) {
+    rects = sliceRects(1);
+    note = '整张猫头就是这一张';
+  } else if (n <= 8) {
+    rects = sliceRects(n);
+    note = `${n} 张照片平均分成 ${n} 块，每张只出现一次`;
+  } else {
+    const g = autoGrid(n);
+    rects = gridRects(g.cols, g.rows);
+    note = `${n} 张照片按 ${g.cols} × ${g.rows} 均分铺满`;
+  }
+  $('layoutNote').textContent = note;
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+
+  // 1) 猫头底影
+  ctx.save();
+  ctx.shadowColor = 'rgba(140,100,62,.22)';
+  ctx.shadowBlur = 26;
+  ctx.shadowOffsetY = 12;
+  ctx.fillStyle = '#fff';
+  ctx.fill(catPath2D);
+  ctx.restore();
+
+  // 2) 拼贴（裁剪在猫头内）
+  ctx.save();
+  ctx.clip(catPath2D);
+  const order = shuffleWithSeed(loaded, seed);
+  rects.forEach((rc, i) => {
+    const rec = order[i % order.length];
+    const x = rc.x + gap / 2;
+    const y = rc.y + gap / 2;
+    const w = Math.max(1, rc.w - gap);
+    const h = Math.max(1, rc.h - gap);
+    drawCover(ctx, rec, x, y, w, h);
+  });
+  // 轻微高光，让层次更柔和
+  const g2 = ctx.createLinearGradient(0, 0, 0, VH);
+  g2.addColorStop(0, 'rgba(255,255,255,.16)');
+  g2.addColorStop(0.55, 'rgba(255,255,255,0)');
+  g2.addColorStop(1, 'rgba(90,60,30,.10)');
+  ctx.fillStyle = g2;
+  ctx.fillRect(0, 0, VW, VH);
+  ctx.restore();
+
+  // 3) 轮廓 + 胡须
+  if (showWhiskers) {
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 9;
+    ctx.strokeStyle = 'rgba(255,255,255,.92)';
+    ctx.stroke(catPath2D);
+    ctx.lineWidth = 3.4;
+    ctx.strokeStyle = 'rgba(122,88,58,.55)';
+    ctx.stroke(catPath2D);
+
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = 'rgba(122,88,58,.42)';
+    WHISKERS.forEach(([x1, y1, x2, y2]) => {
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
+}
+
+/* =========================================================
+   加载照片
+   ========================================================= */
+async function decodeBlob(blob) {
+  if ('createImageBitmap' in window) {
+    try { return await createImageBitmap(blob, { imageOrientation: 'from-image' }); } catch (e) { /* next */ }
+    try { return await createImageBitmap(blob); } catch (e) { /* next */ }
+  }
+  const url = URL.createObjectURL(blob);
+  try {
+    return await new Promise((res, rej) => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = rej;
+      img.src = url;
+    });
+  } finally { setTimeout(() => URL.revokeObjectURL(url), 8000); }
+}
+
+function setProgress(done, total) {
+  const bar = $('loadBar');
+  const txt = $('loadTxt');
+  if (!bar || !txt) return;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  bar.style.width = pct + '%';
+  txt.textContent = `正在铺满猫头… ${done} / ${total}`;
+}
+
+async function loadPhotos() {
+  let data;
+  try {
+    const res = await fetch('photos.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    data = await res.json();
+  } catch (e) {
+    $('loadTxt').textContent = '没找到照片清单（photos.json），请先用工作台的「发布到网站」生成并解压到这里。';
+    $('loadBar').style.display = 'none';
+    return;
+  }
+  meta = data || {};
+  const list = (Array.isArray(meta.photos) ? meta.photos : []).filter((p) => p && p.file);
+
+  const total = list.length;
+  setProgress(0, total);
+  if (!total) {
+    $('loadTxt').textContent = '清单里还没有照片。';
+    $('loadBar').style.display = 'none';
+    return;
+  }
+
+  // 并发解码，边下边铺（并发数别太高，手机容易顶不住）
+  const CONC = 5;
+  let next = 0, done = 0;
+  const slots = new Array(total).fill(null);
+
+  const worker = async () => {
+    while (true) {
+      const i = next++;
+      if (i >= total) return;
+      const item = list[i];
+      try {
+        const r = await fetch(item.file, { cache: 'force-cache' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const bmp = await decodeBlob(await r.blob());
+        slots[i] = { file: item.file, name: item.name || '', _bitmap: bmp };
+      } catch (e) {
+        console.warn('这张没能加载：' + item.file, e);
+        slots[i] = null;
+      }
+      done++;
+      setProgress(done, total);
+      if (done % 6 === 0 || done === total) {
+        photos = slots.filter(Boolean);
+        render();
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONC, total) }, worker));
+
+  photos = slots.filter(Boolean);
+  ready = true;
+  render();
+  $('loading').classList.add('gone');
+
+  // 默认档位：照片多就铺满到「每张都能完整展示」的列数
+  applyDefaultLayout();
+  renderOverview();
+}
+
+function applyDefaultLayout() {
+  const n = photos.length;
+  const cols = n > 8 ? suggestCols(n) : 10;
+  $('density').value = cols;
+  document.querySelectorAll('#modeSeg button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.mode === layoutMode);
+  });
+  syncMode();
+  render();
+}
+
+function renderOverview() {
+  const el = $('overview');
+  const n = (meta && Number(meta.cats)) || photos.length;
+  const when = (meta && meta.updatedAt) ? fmtMonth(meta.updatedAt) : '';
+  el.innerHTML = `${pawSvg()}<b>${n}</b> 只喵星人${when ? `<span class="ov-when">· 更新于 ${when}</span>` : ''}`;
+  el.classList.add('ready');
+}
+
+function fmtMonth(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return `${d.getFullYear()} 年 ${d.getMonth() + 1} 月`;
+}
+
+function pawSvg() {
+  return `<svg class="ov-paw" viewBox="0 0 64 64" aria-hidden="true">
+    <ellipse cx="32" cy="42" rx="15" ry="12" fill="currentColor"/>
+    <ellipse cx="13" cy="26" rx="6.5" ry="8" fill="currentColor"/>
+    <ellipse cx="25" cy="17" rx="6.5" ry="8.5" fill="currentColor"/>
+    <ellipse cx="39" cy="17" rx="6.5" ry="8.5" fill="currentColor"/>
+    <ellipse cx="51" cy="26" rx="6.5" ry="8" fill="currentColor"/>
+  </svg>`;
+}
+
+/* =========================================================
+   控件
+   ========================================================= */
+function syncMode() {
+  $('densityCtl').style.display = layoutMode === 'grid' ? '' : 'none';
+}
+
+function bind() {
+  $('modeSeg').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-mode]');
+    if (!b) return;
+    layoutMode = b.dataset.mode;
+    document.querySelectorAll('#modeSeg button').forEach((x) => x.classList.toggle('on', x === b));
+    syncMode();
+    render();
+  });
+  $('density').addEventListener('input', render);
+  $('gap').addEventListener('input', render);
+  $('whiskers').addEventListener('change', render);
+  $('shuffle').addEventListener('click', () => {
+    seed = Math.floor(Math.random() * 1e6);
+    render();
+  });
+  $('download').addEventListener('click', () => {
+    canvas.toBlob((b) => {
+      const a = document.createElement('a');
+      const d = new Date();
+      const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+      a.href = URL.createObjectURL(b);
+      a.download = `喵星人头像墙-${stamp}.png`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+    }, 'image/png');
+  });
+  $('infoBtn').addEventListener('click', () => {
+    const on = document.body.classList.toggle('hide-overview');
+    $('infoBtn').setAttribute('aria-pressed', String(!on));
+    $('infoBtn').title = on ? '显示总览' : '只显示拼贴';
+  });
+}
+
+bind();
+render();
+loadPhotos();

@@ -1226,8 +1226,9 @@ function uniqueName(base, ext, used) {
   return `${n}.${ext}`;
 }
 
-// —— 按裁剪参数渲染成品 JPEG（未裁剪的 = 原图完整导出，最长边不超存库尺寸） ——
-function renderExportBlob(rec) {
+// —— 按裁剪参数渲染成品 JPEG（未裁剪的 = 原图完整导出，最长边不超存库尺寸）
+//    watermark = true 时叠一层「Theo + 猫爪」对角密排水印（只用于发布，不影响库里的原图）
+function renderExportBlob(rec, watermark) {
   const img = sourceOf(rec);
   if (!img) return Promise.resolve(null);
   const iw = pxW(img), ih = pxH(img);
@@ -1243,6 +1244,7 @@ function renderExportBlob(rec) {
   x.fillStyle = '#fff';
   x.fillRect(0, 0, w, h);
   x.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+  if (watermark) drawWatermark(x, w, h);
   return new Promise((r) => cv.toBlob((b) => r(b), 'image/jpeg', 0.9));
 }
 
@@ -1314,6 +1316,197 @@ async function exportZip() {
   setTimeout(() => URL.revokeObjectURL(a.href), 8000);
   toast(`图片包已保存到下载文件夹（${files.length - 1} 张照片 + 拼图 + 清单）`);
 }
+
+/* =========================================================
+   发布到网站（GitHub Pages）
+   产出：一个 zip，内部已经是站点结构，在项目根目录解压即可覆盖落位
+     docs/meowtonians/<客户id-猫名>.jpg   成品图（可选叠加水印）
+     docs/meowtonians/拼贴-大猫头.png     分享缩略图（og:image）
+     docs/photos.json                    照片清单（只含文件名与猫名）
+   docs/ 里的 index.html / share.css / share.js 是仓库里的页面源文件，
+   发布不覆盖它们，只往 docs/meowtonians/ 和 docs/photos.json 放东西。
+   ========================================================= */
+
+const WATERMARK_TEXT = 'Theo';
+const SITE_DIR = 'docs';                     // GitHub Pages 从这里发布
+const SITE_PHOTO_DIR = 'meowtonians';        // 站点内的照片目录
+
+// 一个小猫爪：掌垫 + 四个趾垫（以 (x,y) 为中心，s 为整体宽度）
+function pawAt(cx, x, y, s) {
+  const r = s / 2;
+  cx.beginPath();
+  cx.ellipse(x, y + r * 0.44, r * 0.60, r * 0.50, 0, 0, Math.PI * 2);
+  cx.ellipse(x - r * 0.60, y - r * 0.26, r * 0.20, r * 0.26, 0, 0, Math.PI * 2);
+  cx.ellipse(x - r * 0.21, y - r * 0.50, r * 0.20, r * 0.27, 0, 0, Math.PI * 2);
+  cx.ellipse(x + r * 0.21, y - r * 0.50, r * 0.20, r * 0.27, 0, 0, Math.PI * 2);
+  cx.ellipse(x + r * 0.60, y - r * 0.26, r * 0.20, r * 0.26, 0, 0, Math.PI * 2);
+  cx.fill();
+  cx.stroke();
+}
+
+/* 对角密排铺满整张图：每个单元 = 小猫爪 + 「Theo」。
+   白色半透明 + 极淡深色描边，浅底深底都能看见一点；因为密排，
+   透明度压得很低也不会看不见，同时对拼贴观感的干扰很小。 */
+function drawWatermark(cx, w, h) {
+  const span = Math.hypot(w, h);
+  const unit = Math.max(96, Math.round(Math.min(w, h) * 0.40));   // 单元间距
+  const fs = Math.max(11, Math.round(unit * 0.26));               // 文字大小
+  const paw = fs * 1.15;
+  cx.save();
+  cx.translate(w / 2, h / 2);
+  cx.rotate(-Math.PI / 5);
+  cx.textAlign = 'center';
+  cx.textBaseline = 'middle';
+  cx.font = `700 ${fs}px system-ui,-apple-system,"PingFang SC",sans-serif`;
+  cx.fillStyle = 'rgba(255,255,255,.22)';
+  cx.strokeStyle = 'rgba(58,42,32,.13)';
+  cx.lineWidth = Math.max(1, fs * 0.07);
+  cx.lineJoin = 'round';
+  let row = 0;
+  for (let y = -span / 2; y <= span / 2; y += unit, row++) {
+    const offset = (row % 2) * (unit / 2);                        // 交错排列更均匀
+    for (let x = -span / 2; x <= span / 2; x += unit) {
+      const px = x + offset;
+      pawAt(cx, px, y - fs * 0.62, paw);
+      cx.strokeText(WATERMARK_TEXT, px, y + fs * 0.72);
+      cx.fillText(WATERMARK_TEXT, px, y + fs * 0.72);
+    }
+  }
+  cx.restore();
+}
+
+// 给已经生成的图片 blob 再叠一层水印；clipCat = 只保留猫头轮廓内的部分
+// （拼贴缩略图用：猫头外是透明的，水印铺满整个画布会很难看）
+async function watermarkBlob(blob, clipCat) {
+  const bmp = await decodeFile(blob);
+  const w = bmp.width || bmp.naturalWidth, h = bmp.height || bmp.naturalHeight;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const x = c.getContext('2d');
+  x.drawImage(bmp, 0, 0);
+  drawWatermark(x, w, h);
+  if (clipCat) {
+    x.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+    x.globalCompositeOperation = 'destination-in';   // 只留猫头形状内的像素
+    x.fillStyle = '#fff';
+    x.fill(catPath2D);
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    x.globalCompositeOperation = 'source-over';
+  }
+  return await new Promise((r) => c.toBlob((b) => r(b), 'image/png'));
+}
+
+// 站点文案里的「N 只喵星人」：同一户内名字去重、合照不算（和工作台统计口径一致）
+function siteCatCount() {
+  const src = (demoActive ? (demoSnapshot || []) : photos).filter((p) => !p.demo && p._bitmap);
+  const keys = new Set();
+  let unnamed = 0;
+  for (const p of src) {
+    const name = (p.name || '').trim();
+    if (!name) { unnamed++; continue; }
+    if (isGroupName(name)) continue;
+    keys.add(pidOf(p) + '|' + name);
+  }
+  return keys.size + (keys.size ? 0 : (unnamed ? 1 : 0));
+}
+
+async function buildSiteZip(watermark) {
+  const src = (demoActive ? (demoSnapshot || []) : photos)
+    .filter((p) => !p.demo && p._bitmap && p.blob);
+  if (!src.length) return null;
+
+  const used = new Set();
+  const files = [];
+  const manifest = {
+    app: 'catsmap', type: 'site', version: 1,
+    updatedAt: new Date().toISOString(),
+    count: 0, cats: 0,
+    mosaic: `${SITE_PHOTO_DIR}/拼贴-大猫头.png`,
+    photos: []
+  };
+
+  let done = 0;
+  for (const rec of src) {
+    try {
+      const blob = await renderExportBlob(rec, watermark);
+      if (!blob) continue;
+      const fname = uniqueName(photoFileBase(rec), 'jpg', used);
+      files.push({ name: `${SITE_DIR}/${SITE_PHOTO_DIR}/${fname}`, data: await blobBytes(blob) });
+      // 隐私：清单只带文件名和猫名，不带地址/日期/备注/编号
+      manifest.photos.push({ file: `${SITE_PHOTO_DIR}/${fname}`, name: (rec.name || '').trim() });
+    } catch (e) { console.warn('一张照片发布失败，已跳过', e); }
+    done++;
+    if (done % 5 === 0) toast(`正在发布… ${done} / ${src.length}`);
+  }
+  if (!files.length) return null;
+
+  try {
+    let mosaic = await mosaicPngBlob();
+    if (mosaic && watermark) mosaic = await watermarkBlob(mosaic, true);
+    if (mosaic) files.push({ name: `${SITE_DIR}/${SITE_PHOTO_DIR}/拼贴-大猫头.png`, data: await blobBytes(mosaic) });
+  } catch (e) { console.warn('拼贴缩略图生成失败，已跳过', e); }
+
+  manifest.count = manifest.photos.length;
+  manifest.cats = siteCatCount();
+  files.push({ name: `${SITE_DIR}/photos.json`, data: new TextEncoder().encode(JSON.stringify(manifest, null, 2)) });
+  return zipStore(files);
+}
+
+async function publishSite(watermark) {
+  const src = (demoActive ? (demoSnapshot || []) : photos).filter((p) => !p.demo && p._bitmap);
+  if (!src.length) return toast('还没有照片可以发布');
+  toast(`正在发布 ${src.length} 张照片…`);
+  let zip;
+  try { zip = await buildSiteZip(watermark); }
+  catch (e) { console.error(e); return toast('发布失败：' + e.message); }
+  if (!zip) return toast('没有可发布的照片（示例照片不会发布）');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(zip);
+  a.download = `猫咪头像墙-发布包-${todayISO()}.zip`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+  toast(`发布包已保存到下载文件夹（${src.length} 张照片${watermark ? '，已加水印' : '，无水印'}）`, { label: '知道了', ms: 6000 });
+}
+
+/* ---------- 发布面板 ---------- */
+function drawWmPreview() {
+  const cv = $('wmPreview');
+  const cx = cv.getContext('2d');
+  const w = cv.width, h = cv.height;
+  const g = cx.createLinearGradient(0, 0, w, h);
+  g.addColorStop(0, '#EBD9C4');
+  g.addColorStop(0.55, '#C9A98C');
+  g.addColorStop(1, '#6E5B4C');
+  cx.fillStyle = g;
+  cx.fillRect(0, 0, w, h);
+  drawWatermark(cx, w, h);
+}
+
+function openPublishModal() {
+  const n = (demoActive ? (demoSnapshot || []) : photos).filter((p) => !p.demo && p._bitmap).length;
+  if (!n) return toast('还没有照片可以发布');
+  $('pubCount').textContent = `${n} 张照片`;
+  $('pubCatCount').textContent = `${siteCatCount()} 只喵星人`;
+  drawWmPreview();
+  $('publishModal').classList.add('show');
+  document.body.classList.add('moving');
+}
+function closePublishModal() {
+  $('publishModal').classList.remove('show');
+  document.body.classList.remove('moving');
+}
+
+$('publishBtn').addEventListener('click', openPublishModal);
+$('pubCancel').addEventListener('click', closePublishModal);
+$('publishModal').addEventListener('click', (e) => { if (e.target === $('publishModal')) closePublishModal(); });
+$('pubWatermark').addEventListener('change', () => {
+  $('wmPreview').style.opacity = $('pubWatermark').checked ? '1' : '.28';
+});
+$('pubGo').addEventListener('click', async () => {
+  const wm = $('pubWatermark').checked;
+  closePublishModal();
+  await publishSite(wm);
+});
 
 /* =========================================================
    下载

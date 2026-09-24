@@ -41,6 +41,7 @@
     <div class="panel-head">
       <h2>探访照片</h2>
       <div class="head-btns">
+        <button class="btn-ghost" id="publishBtn" title="打包成 GitHub Pages 用的站点内容（图片 + 清单），解压到项目根目录即可">发布到网站</button>
         <button class="btn-ghost" id="zipBtn" title="把裁剪后的照片、拼贴大猫头和记录清单打包成 zip">导出图片包</button>
         <button class="btn-ghost" id="exportBtn" title="把全部照片和记录打包成一个 zip 文件（原图 + 记录清单，体积小）">导出备份</button>
         <button class="btn-ghost" id="importBtn" title="从备份文件恢复照片和记录（支持新版 zip 和旧版 json）">导入恢复</button>
@@ -196,6 +197,41 @@
       <button class="btn-soft" id="moveUnassign" type="button">移出分组（不编号）</button>
       <span class="crop-spacer"></span>
       <button class="btn-ghost" id="moveCancel" type="button">取消</button>
+    </div>
+  </div>
+</div>
+
+<div class="move-modal" id="publishModal">
+  <div class="move-panel pub-panel">
+    <div class="crop-head">
+      <h2>发布到网站</h2>
+      <span class="crop-step" id="pubCount"></span>
+    </div>
+
+    <p class="pub-tip">打包成一个 zip，里面已经是站点目录结构。解压到<b>项目根目录</b>（覆盖同名文件）即可，不用担心挑图。</p>
+
+    <ul class="pub-list">
+      <li><code>docs/meowtonians/</code> 全部成品图</li>
+      <li><code>docs/meowtonians/拼贴-大猫头.png</code> 分享用缩略图</li>
+      <li><code>docs/photos.json</code> 照片清单（<span id="pubCatCount"></span>）</li>
+    </ul>
+
+    <label class="pub-wm">
+      <input type="checkbox" id="pubWatermark" checked>
+      <span>给图片叠加水印 <em>Theo + 小猫爪，对角密排</em></span>
+    </label>
+
+    <div class="pub-preview">
+      <canvas id="wmPreview" width="380" height="132"></canvas>
+      <span class="pub-preview-lbl">水印在深浅底上的效果预览</span>
+    </div>
+
+    <p class="pub-hint">只有发布出来的图片带水印，你库里的原图不受影响。清单里只写文件名和猫名，不含地址、日期、备注和客户编号。</p>
+
+    <div class="move-actions">
+      <span class="crop-spacer"></span>
+      <button class="btn-ghost" id="pubCancel" type="button">取消</button>
+      <button class="btn-primary" id="pubGo" type="button">开始打包</button>
     </div>
   </div>
 </div>
