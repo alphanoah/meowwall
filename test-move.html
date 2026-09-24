@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>单张照片移动订单 自测</title>
+<style>
+  body { font: 14px/1.6 system-ui, sans-serif; margin: 20px; }
+  iframe { width: 1100px; height: 900px; border: 1px solid #ccc; }
+  .pass { color: #0a7d32; font-weight: 600; }
+  .fail { color: #c22; font-weight: 600; }
+  pre { background: #f6f6f6; padding: 10px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h2>单张照片移动订单 自测（移到已存在/新编号 · 移出分组 · 撤销 · 空组回收）</h2>
+<div id="status">等待 iframe 就绪…</div>
+<pre id="out"></pre>
+<iframe id="app" src="/index.html"></iframe>
+<script>
+const out = [];
+function log(s) { out.push(s); document.getElementById('out').textContent = out.join('\n'); }
+function done(ok) {
+  const el = document.getElementById('status');
+  el.innerHTML = ok ? '<span class="pass">全部通过</span>' : '<span class="fail">存在失败项</span>';
+  document.title = ok ? 'TEST-PASS' : 'TEST-FAIL';
+}
+
+function makeFile(name, color) {
+  const s = 200, c = document.createElement('canvas');
+  c.width = c.height = s;
+  const x = c.getContext('2d');
+  x.fillStyle = color; x.fillRect(0, 0, s, s);
+  x.fillStyle = '#8a6a4f';
+  x.beginPath(); x.arc(s / 2, s * 0.56, s * 0.3, 0, 7); x.fill();
+  const bin = atob(c.toDataURL('image/jpeg', 0.85).split(',')[1]);
+  const u8 = new Uint8Array(bin.length);
+  for (let k = 0; k < bin.length; k++) u8[k] = bin.charCodeAt(k);
+  return new File([u8], name, { type: 'image/jpeg' });
+}
+
+function setVal(input, v) {
+  input.value = v;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function runChecks(win, doc) {
+  let ok = true;
+  const chk = (cond, label, extra) => {
+    log((cond ? 'PASS ' : 'FAIL ') + label + (cond ? '' : ' → ' + (extra ?? '')));
+    if (!cond) ok = false;
+  };
+  const q = (sel, root) => (root || doc).querySelector(sel);
+  const qa = (sel, root) => [...(root || doc).querySelectorAll(sel)];
+  const gEls = () => qa('.group-card');
+  const gByPid = (pid) => gEls().find((g) => q('.f-pid', g).value === pid);
+  const pids = () => qa('.f-pid').map((i) => i.value).join(',');
+  const namesIn = (g) => qa('.card .f-name', g).map((i) => i.value).join('/');
+  const movePanelOpen = () => q('#moveModal').classList.contains('show');
+
+  // 先关掉上传后自动弹出的裁剪队列，避免干扰
+  const keepBtn = qa('button').find((b) => b.textContent.includes('全部保持原样'));
+  if (keepBtn) keepBtn.click();
+
+  // —— 起始状态：92[屁屁] / 91[波波,合照] / 90[奶牛,咪咪] ——
+  chk(gEls().length === 3, '起始 3 个订单', gEls().length + ' 组 / ' + pids());
+  chk(namesIn(gByPid('90')) === '奶牛/咪咪', '订单 90 两张', namesIn(gByPid('90')));
+  chk(namesIn(gByPid('91')) === '波波/合照', '订单 91 合照排最后', namesIn(gByPid('91')));
+  chk(q('#statCats').textContent === '4' && q('#statClients').textContent === '3', '起始统计 4 猫 / 3 客户',
+      q('#statCats').textContent + ' 猫 / ' + q('#statClients').textContent + ' 客户');
+
+  // 每行都有「移到…」入口
+  chk(qa('.card [data-act="move"]').length === 5, '每张照片都有「移到…」按钮', qa('.card [data-act="move"]').length);
+
+  // 把 91 组的日期改成 2026-01-05，用来验证「移动后保留照片自己的日期」
+  setVal(q('[data-gk="date"]', gByPid('91')), '2026-01-05');
+  chk(q('[data-gk="date"]', gByPid('91')).value === '2026-01-05', '订单 91 日期改为 2026-01-05');
+
+  // —— 打开咪咪的移动面板 ——
+  const mimiCard = qa('.card', gByPid('90')).find((c) => q('.f-name', c).value === '咪咪');
+  q('[data-act="move"]', mimiCard).click();
+  chk(movePanelOpen(), '点「移到…」打开面板');
+  chk(q('#moveWho').textContent.includes('咪咪') && q('#moveWho').textContent.includes('90'), '面板显示是哪张、当前订单', q('#moveWho').textContent);
+  const items = qa('.move-item');
+  chk(items.length === 3, '列表列出 3 个已有订单', items.length + ' 项');
+  chk(items[2].classList.contains('is-cur') && items[2].dataset.pid === '90', '当前所在组标注「当前」且不可点', items.map((i) => i.dataset.pid + (i.classList.contains('is-cur') ? '(cur)' : '')).join(','));
+
+  // 编号框只收数字
+  setVal(q('#movePid'), '9a5b');
+  chk(q('#movePid').value === '95', '编号框只收数字', q('#movePid').value);
+
+  // 空输入 → 给提示、面板不关
+  setVal(q('#movePid'), '');
+  q('#moveGo').click();
+  chk(q('#toastTxt').textContent.includes('请先填') && movePanelOpen(), '空编号给提示且面板不关', q('#toastTxt').textContent);
+
+  // —— 移到已有编号 91 ——
+  q('.move-item[data-pid="91"]').click();
+  chk(!movePanelOpen(), '移动后面板自动关闭');
+  chk(gEls().length === 3 && pids() === '92,91,90', '仍是 3 个订单', pids());
+  chk(namesIn(gByPid('91')) === '咪咪/波波/合照', '咪咪并入 91 且排在组内最前、合照仍最后', namesIn(gByPid('91')));
+  chk(namesIn(gByPid('90')) === '奶牛', '原组 90 少一张', namesIn(gByPid('90')));
+  chk(q('[data-gk="date"]', gByPid('91')).value !== '2026-01-05' && q('[data-gk="place"]', gByPid('91')).value === 'A楼302',
+      '日期/地址保留照片自己的值（不跟随目标组）',
+      q('[data-gk="date"]', gByPid('91')).value + ' / ' + q('[data-gk="place"]', gByPid('91')).value);
+  chk(q('#statCats').textContent === '4' && q('#statClients').textContent === '3', '移动后统计不变（猫仍在某户内）',
+      q('#statCats').textContent + ' 猫 / ' + q('#statClients').textContent + ' 客户');
+
+  // —— 撤销 ——
+  chk(!q('#toastAct').hidden && q('#toastAct').textContent === '撤销', '提示里带「撤销」按钮', q('#toastAct').textContent);
+  q('#toastAct').click();
+  chk(namesIn(gByPid('90')) === '奶牛/咪咪', '撤销后咪咪回到 90 组原位置', namesIn(gByPid('90')));
+  chk(namesIn(gByPid('91')) === '波波/合照', '撤销后 91 组复原', namesIn(gByPid('91')));
+  chk(q('[data-gk="date"]', gByPid('91')).value === '2026-01-05' && q('[data-gk="place"]', gByPid('91')).value === 'B花园',
+      '撤销后 91 组日期/地址复原', q('[data-gk="date"]', gByPid('91')).value + ' / ' + q('[data-gk="place"]', gByPid('91')).value);
+  chk(pids() === '92,91,90', '撤销后订单序不变', pids());
+
+  // —— 新建订单（填新编号） ——
+  // 屁屁是 92 组唯一一张，移走后 92 空组自动消失
+  const pipiCard = qa('.card', gByPid('92'))[0];
+  q('[data-act="move"]', pipiCard).click();
+  setVal(q('#movePid'), '95');
+  q('#moveGo').click();
+  chk(pids() === '95,91,90' && namesIn(gByPid('95')) === '屁屁', '填新编号 → 新建订单 95（这张是第一张）', pids());
+  chk(!gByPid('92'), '原订单 92 被搬空后自动消失（空组回收）', pids());
+  chk(q('#statClients').textContent === '3', '客户数仍是 3（95/91/90）', q('#statClients').textContent);
+
+  // —— 移出分组（不编号） ——
+  q('[data-act="move"]', qa('.card', gByPid('95'))[0]).click();
+  q('#moveUnassign').click();
+  chk(!gByPid('95'), '移出分组后 95 空组消失', pids());
+  const gs2 = gEls();
+  chk(gs2.length === 3 && q('.f-pid', gs2[0]).value === '', '未编号组排最前、共 3 组', pids());
+  chk(namesIn(gs2[0]) === '屁屁', '屁屁回到未编号组', namesIn(gs2[0]));
+  chk(q('#statClients').textContent === '3', '客户数：91/90 两位 + 有名无编号一位', q('#statClients').textContent);
+  chk(q('#statCats').textContent === '4', '猫咪数不变', q('#statCats').textContent);
+
+  // —— 合照移到别的组，仍排组内最后 ——
+  q('[data-act="move"]', qa('.card', gByPid('91')).find((c) => q('.f-name', c).value === '合照')).click();
+  q('.move-item[data-pid="90"]').click();
+  chk(gByPid('91') && namesIn(gByPid('91')) === '波波', '合照移出后 91 组只剩波波', gByPid('91') ? namesIn(gByPid('91')) : '组已消失');
+  chk(namesIn(gByPid('90')) === '奶牛/咪咪/合照', '合照移到 90 组后排最后', namesIn(gByPid('90')));
+
+  done(ok);
+}
+
+const iframe = document.getElementById('app');
+let started = false;
+const t0 = Date.now();
+const timer = setInterval(() => {
+  const win = iframe.contentWindow, doc = iframe.contentDocument;
+  if (!win || !doc || !doc.getElementById('mosaicTag')) return;
+  if (!started && typeof win.addFiles === 'function') {
+    started = true;
+    win.addFiles([
+      makeFile('90-咪咪-A楼302.jpg', '#FFD9A8'),
+      makeFile('90-奶牛.jpg', '#D6EFFF'),
+      makeFile('91-波波-B花园.jpg', '#FFE3EC'),
+      makeFile('91-all.jpg', '#E4F6D8'),
+      makeFile('92-屁屁.jpg', '#EADCFF')
+    ]);
+  }
+  if (!started) return;
+  const tag = doc.getElementById('mosaicTag').textContent;
+  if (!tag.includes('5 张照片')) {
+    if (Date.now() - t0 > 20000) { clearInterval(timer); log('FAIL: 5 张未加载完成, tag=' + tag); done(false); }
+    return;
+  }
+  clearInterval(timer);
+  try { runChecks(win, doc); } catch (e) { log('FAIL: 异常 ' + e.message + '\n' + (e.stack || '')); done(false); }
+}, 100);
+</script>
+</body>
+</html>

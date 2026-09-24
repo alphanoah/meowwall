@@ -79,13 +79,31 @@ function stripNameSuffix(p) {
   p.name = m[1].trim();
 }
 
-let toastTimer;
-function toast(msg) {
+let toastTimer, toastActTimer;
+function hideToast() {
+  clearTimeout(toastTimer); clearTimeout(toastActTimer);
+  $('toast').classList.remove('show');
+}
+/* 普通提示；传 act = { label, fn, ms } 时提示里带一个可点按钮（如「撤销」），默认 6 秒失效 */
+function toast(msg, act) {
   const t = $('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+  const btn = $('toastAct');
+  $('toastTxt').textContent = msg;
+  clearTimeout(toastTimer); clearTimeout(toastActTimer);
+  if (act) {
+    btn.hidden = false;
+    btn.textContent = act.label || '撤销';
+    btn.onclick = () => { hideToast(); act.fn(); };
+    t.classList.add('act');
+    t.classList.add('show');
+    toastActTimer = setTimeout(hideToast, act.ms || 6000);
+  } else {
+    btn.hidden = true;
+    btn.onclick = null;
+    t.classList.remove('act');
+    t.classList.add('show');
+    toastTimer = setTimeout(hideToast, 2200);
+  }
 }
 
 function mulberry32(a) {
@@ -591,6 +609,7 @@ function renderList() {
           <input class="f-note" data-k="note" placeholder="备注：吃了几口、便便、精神状态…" value="${escapeAttr(p.note)}">
           <div class="card-foot">
             <button class="mini-btn" data-act="crop" title="裁剪这张照片（原图会保留）">裁剪</button>
+            <button class="mini-btn" data-act="move" title="把这张照片挪到别的订单/家庭（传错户时用）">移到…</button>
             ${isCropped(p) ? '<span class="mini-flag">已裁剪</span>' : ''}
           </div>
         </div>
@@ -712,6 +731,7 @@ $('photoList').addEventListener('click', async (e) => {
     openCropModal(rec, false);   // false = 从卡片进来，只有这一张
     return;
   }
+  if (e.target.closest('[data-act="move"]')) { openMoveModal(rec); return; }
   if (e.target.closest('.del')) {
     if (!confirm(`删除「${catNameOf(rec)}」这张照片？`)) return;
     photos = photos.filter((p) => p.id !== rec.id);
@@ -728,6 +748,106 @@ $('photoList').addEventListener('click', async (e) => {
 });
 
 $('lightbox').addEventListener('click', () => $('lightbox').classList.remove('show'));
+
+/* =========================================================
+   单张照片移动订单（某张传错户时，不必整组搬或删掉重传）
+   · 只改 pid；名字/备注/裁剪/原图都跟着走
+   · 日期、地址保留照片自己的值（不跟随目标组）
+   · 移到目标组最前面（组内顺序 = photos 数组顺序），空组自然消失
+   · 移动后提示里给「撤销」，6 秒内可一键还原（含数组位置）
+   ========================================================= */
+let moveRec = null;
+
+function openMoveModal(rec) {
+  moveRec = rec;
+  const cur = pidOf(rec);
+  $('moveWho').textContent = `「${catNameOf(rec)}」${cur ? `，当前订单 ${cur}` : '，当前未编号'}`;
+  $('movePid').value = '';
+  renderMoveList(cur);
+  $('moveModal').classList.add('show');
+  document.body.classList.add('moving');
+  setTimeout(() => $('movePid').focus(), 30);
+}
+
+function closeMoveModal() {
+  $('moveModal').classList.remove('show');
+  document.body.classList.remove('moving');
+  moveRec = null;
+}
+
+function renderMoveList(curPid) {
+  const box = $('moveList');
+  box.innerHTML = '';
+  const groups = groupPhotos().filter((g) => g.pid);   // 未编号的不列，用底部「移出分组」即可
+  if (!groups.length) {
+    const p = document.createElement('p');
+    p.className = 'move-empty';
+    p.textContent = '还没有别的订单。填一个新编号就能建一个，也可以选「移出分组」让它回到未编号区。';
+    box.appendChild(p);
+    return;
+  }
+  for (const g of groups) {
+    const isCur = g.pid === curPid;
+    const place = ((g.members.find((m) => (m.place || '').trim()) || g.members[0]).place || '').trim();
+    const date = (g.members.find((m) => m.date) || g.members[0]).date || '';
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'move-item' + (isCur ? ' is-cur' : '');
+    b.dataset.pid = g.pid;
+    b.innerHTML = `
+      <span class="mi-pid">订单 ${escapeAttr(g.pid)}</span>
+      <span class="mi-meta">${escapeAttr([date, place].filter(Boolean).join(' · ') || '—')}</span>
+      <span class="mi-cnt">${g.members.length} 张</span>
+      ${isCur ? '<span class="mi-cur">当前</span>' : ''}`;
+    if (!isCur) b.addEventListener('click', () => doMove(g.pid));
+    box.appendChild(b);
+  }
+}
+
+function movePhotoTo(rec, targetPid) {
+  const t = String(targetPid || '').trim().replace(/\D/g, '');
+  if (pidOf(rec) === t) return false;
+  const snap = { pid: rec.pid, date: rec.date, place: rec.place, idx: photos.indexOf(rec) };
+  rec.pid = t;
+  if (snap.idx >= 0) photos.splice(snap.idx, 1);        // 挪到目标组最前面
+  const at = t ? photos.findIndex((p) => pidOf(p) === t) : -1;
+  photos.splice(at < 0 ? 0 : at, 0, rec);
+  saveRecord(rec);
+  renderList(); renderMosaic(true);
+  const label = t ? `订单 ${t}` : '未编号区';
+  toast(`已把「${catNameOf(rec)}」移到${label}${t ? '' : '（可在组头补编号）'}`, {
+    label: '撤销',
+    fn: () => {
+      rec.pid = snap.pid; rec.date = snap.date; rec.place = snap.place;
+      const cur = photos.indexOf(rec);
+      if (cur >= 0) photos.splice(cur, 1);
+      photos.splice(Math.min(snap.idx < 0 ? 0 : snap.idx, photos.length), 0, rec);
+      saveRecord(rec); renderList(); renderMosaic(true);
+      toast('已撤销，照片回到原来的订单');
+    }
+  });
+  return true;
+}
+
+function doMove(targetPid) {
+  const rec = moveRec;
+  closeMoveModal();
+  if (rec) movePhotoTo(rec, targetPid);
+}
+
+$('moveGo').addEventListener('click', () => {
+  const v = $('movePid').value.trim().replace(/\D/g, '');
+  if (!v) return toast('请先填一个订单编号，或选「移出分组」');
+  doMove(v);
+});
+$('movePid').addEventListener('input', (e) => { e.target.value = e.target.value.replace(/\D/g, ''); });
+$('movePid').addEventListener('change', (e) => { e.target.value = e.target.value.replace(/\D/g, ''); });
+$('movePid').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); $('moveGo').click(); }
+});
+$('moveUnassign').addEventListener('click', () => doMove(''));
+$('moveCancel').addEventListener('click', closeMoveModal);
+$('moveModal').addEventListener('click', (e) => { if (e.target === $('moveModal')) closeMoveModal(); });
 
 /* =========================================================
    大猫头拼贴渲染

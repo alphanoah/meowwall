@@ -248,6 +248,41 @@ body.demo-mode #clearAll{opacity:.4;pointer-events:none;}
 .crop-spacer{flex:1;min-width:8px;}
 body.cropping{overflow:hidden;}
 
+/* ---------- 移动到别的订单 ---------- */
+.move-modal{
+  position:fixed;inset:0;background:rgba(40,32,26,.68);backdrop-filter:blur(6px);
+  display:none;z-index:82;padding:22px;overflow:auto;
+}
+.move-modal.show{display:flex;align-items:center;justify-content:center;}
+.move-panel{
+  background:var(--panel);border-radius:18px;padding:18px 20px 16px;
+  width:min(460px,100%);box-shadow:0 24px 60px rgba(0,0,0,.34);
+}
+.move-row{display:flex;align-items:center;gap:8px;}
+.move-row input{
+  flex:1;min-width:0;border:1px solid #EBDCCB;background:#FBF6EF;border-radius:9px;
+  padding:8px 11px;font-size:13px;font-weight:600;color:var(--ink);outline:none;transition:.15s;
+}
+.move-row input::placeholder{font-weight:400;color:#B7A99B;}
+.move-row input:focus{background:#fff;border-color:#EBCFAC;box-shadow:0 0 0 3px rgba(232,137,74,.12);}
+.move-list{display:flex;flex-direction:column;gap:6px;max-height:230px;overflow:auto;margin-top:13px;}
+.move-item{
+  display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+  background:#FFFBF5;border:1px solid var(--line);border-radius:10px;padding:8px 11px;
+  font-size:12.5px;color:var(--ink);transition:.15s;
+}
+.move-item:hover{border-color:var(--accent);background:var(--accent-soft);}
+.move-item .mi-pid{flex:none;font-weight:700;color:var(--accent-d);}
+.move-item .mi-meta{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;color:var(--ink-2);}
+.move-item .mi-cnt{flex:none;font-size:11px;color:#B7A99B;}
+.move-item .mi-cur{flex:none;font-size:10.5px;color:#8A7663;background:#F1E6D8;border-radius:6px;padding:2px 7px;}
+.move-item.is-cur{background:#FBF6EF;color:#9C8B7B;cursor:default;}
+.move-item.is-cur:hover{border-color:var(--line);background:#FBF6EF;}
+.move-empty{margin:0;font-size:12px;color:var(--ink-2);padding:10px 2px;line-height:1.7;}
+.move-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:15px;}
+.move-actions .btn-soft{padding:8px 15px;font-size:12.5px;}
+body.moving{overflow:hidden;}
+
 /* ---------- stage ---------- */
 .panel-right{display:flex;flex-direction:column;}
 .stage{
@@ -302,10 +337,18 @@ body.cropping{overflow:hidden;}
 /* ---------- toast & lightbox ---------- */
 .toast{
   position:fixed;left:50%;bottom:34px;transform:translate(-50%,20px);
+  display:flex;align-items:center;gap:12px;
   background:rgba(47,42,38,.94);color:#fff;padding:10px 20px;border-radius:11px;font-size:13px;
   opacity:0;pointer-events:none;transition:.25s;z-index:60;backdrop-filter:blur(4px);
 }
 .toast.show{opacity:1;transform:translate(-50%,0);}
+.toast.act{padding-right:12px;}
+.toast.act.show{pointer-events:auto;}          /* 带按钮的提示才需要可点 */
+.toast-act{
+  flex:none;background:rgba(255,255,255,.16);color:#fff;font-size:12.5px;font-weight:600;
+  padding:4px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.3);transition:.15s;
+}
+.toast-act:hover{background:rgba(255,255,255,.32);}
 .lightbox{
   position:fixed;inset:0;background:rgba(40,32,26,.72);backdrop-filter:blur(6px);
   display:none;place-items:center;z-index:70;padding:40px;

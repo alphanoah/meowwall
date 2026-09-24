@@ -176,7 +176,31 @@
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="move-modal" id="moveModal">
+  <div class="move-panel">
+    <div class="crop-head">
+      <h2>移动到别的订单</h2>
+      <span class="crop-step" id="moveWho"></span>
+    </div>
+
+    <div class="move-row">
+      <span class="crop-lbl">编号</span>
+      <input id="movePid" inputmode="numeric" placeholder="填编号后按回车" autocomplete="off">
+      <button class="btn-primary" id="moveGo" type="button">移动</button>
+    </div>
+    <p class="crop-hint">填<b>已有编号</b> → 并入那一户；填<b>新编号</b> → 新建一个订单（这张就是它的第一张）。</p>
+
+    <div class="move-list" id="moveList"></div>
+
+    <div class="move-actions">
+      <button class="btn-soft" id="moveUnassign" type="button">移出分组（不编号）</button>
+      <span class="crop-spacer"></span>
+      <button class="btn-ghost" id="moveCancel" type="button">取消</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"><span id="toastTxt"></span><button class="toast-act" id="toastAct" type="button" hidden></button></div>
 <div class="lightbox" id="lightbox"><img alt="预览" id="lightboxImg"></div>
 
 <script src="app.js"></script>
