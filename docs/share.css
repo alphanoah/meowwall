@@ -136,3 +136,31 @@ body.hide-overview .overview.ready{opacity:0;transform:translateY(-6px);}
 @media (prefers-reduced-motion: reduce){
   *{animation:none !important;transition:none !important;}
 }
+
+/* ---------- 小挂件层（脚印 / 溜达小猫 / 角落氛围组） ---------- */
+#widgetLayer{
+  position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:2;
+}
+#widgetLayer.off{display:none;}
+.wtrail,.wwalker,.wcorner{position:absolute;}
+.wtrail{inset:0;}
+.wprint{opacity:0;animation:wprint 6.8s ease-in-out infinite;}
+@keyframes wprint{0%{opacity:0}12%{opacity:.5}50%{opacity:.35}78%{opacity:0}100%{opacity:0}}
+.wwalker{left:0;right:0;bottom:var(--wbottom,6px);animation:wwalk var(--wdur,13s) linear infinite;}
+.wwalker.wrev{animation-name:wwalk-rev;}
+@keyframes wwalk{from{transform:translateX(-200px)}to{transform:translateX(100vw)}}
+@keyframes wwalk-rev{from{transform:translateX(100vw)}to{transform:translateX(-200px)}}
+.wleg{transform-box:fill-box;transform-origin:top center;animation:wswing .48s ease-in-out infinite alternate;}
+.wleg.wb{animation-delay:.24s;}
+@keyframes wswing{from{transform:rotate(17deg)}to{transform:rotate(-17deg)}}
+.wbob{animation:wup .5s ease-in-out infinite alternate;}
+@keyframes wup{from{transform:translateY(0)}to{transform:translateY(-2.5px)}}
+.wtail{transform-box:fill-box;transform-origin:bottom right;animation:wtail 1.4s ease-in-out infinite alternate;}
+@keyframes wtail{from{transform:rotate(-7deg)}to{transform:rotate(9deg)}}
+.wbreathe{transform-box:fill-box;transform-origin:bottom center;animation:wbreathe 3.2s ease-in-out infinite alternate;}
+@keyframes wbreathe{from{transform:scaleY(1)}to{transform:scaleY(1.045)}}
+.wyarn{animation:wyarn 6s ease-in-out infinite alternate;}
+@keyframes wyarn{from{transform:translate(0,0) rotate(0deg)}to{transform:translate(30px,-10px) rotate(150deg)}}
+.wz{opacity:0;animation:wz 4.5s ease-out infinite;}
+.wz2{animation-delay:1.5s;}.wz3{animation-delay:3s;}
+@keyframes wz{0%{opacity:0;transform:translateY(6px)}25%{opacity:.75}70%{opacity:.3;transform:translateY(-14px)}100%{opacity:0;transform:translateY(-22px)}}
