@@ -455,6 +455,70 @@ function watermarkedCanvas() {
 }
 
 /* =========================================================
+   摸摸猫：点一下大猫头，点击处冒出猫爪 + 爱心（可选喵一声）
+   与长按存图共存：压住 <0.6s 且没滑动的才算「摸」
+   ========================================================= */
+const PET_PAW = `<svg viewBox="0 0 64 64"><g fill="#F6C6A0" stroke="#A9714B" stroke-width="2.4" stroke-linejoin="round">
+  <ellipse cx="32" cy="42" rx="15" ry="12"/><ellipse cx="13" cy="26" rx="6.5" ry="8"/>
+  <ellipse cx="25" cy="17" rx="6.5" ry="8.5"/><ellipse cx="39" cy="17" rx="6.5" ry="8.5"/><ellipse cx="51" cy="26" rx="6.5" ry="8"/>
+</g></svg>`;
+const PET_HEART = `<svg viewBox="0 0 32 32"><path d="M16 28C8 22 3 17 3 11.5 3 7.4 6.2 4.5 10 4.5c2.4 0 4.6 1.2 6 3.2 1.4-2 3.6-3.2 6-3.2 3.8 0 7 2.9 7 7C29 17 24 22 16 28Z" fill="#F2A0B4" stroke="#B4576F" stroke-width="1.6"/></svg>`;
+
+// 「喵」用 Web Audio 现场合成（零音频文件）：锯齿波 + 音高先扬后落 + 低通收尾
+let _audio = null;
+function meow() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    _audio = _audio || new AC();
+    if (_audio.state === 'suspended') _audio.resume();
+    const t = _audio.currentTime + 0.01;
+    const base = 1 + (Math.random() * 0.16 - 0.08);      // 每次音高微抖，像不同的猫
+    const osc = _audio.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(480 * base, t);
+    osc.frequency.exponentialRampToValueAtTime(900 * base, t + 0.09);
+    osc.frequency.setValueAtTime(870 * base, t + 0.15);
+    osc.frequency.exponentialRampToValueAtTime(340 * base, t + 0.42);
+    const lp = _audio.createBiquadFilter();
+    lp.type = 'lowpass'; lp.Q.value = 3;
+    lp.frequency.setValueAtTime(1900, t);
+    lp.frequency.exponentialRampToValueAtTime(700, t + 0.42);
+    const g = _audio.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.2, t + 0.03);
+    g.gain.setValueAtTime(0.2, t + 0.2);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.44);
+    osc.connect(lp).connect(g).connect(_audio.destination);
+    osc.start(t); osc.stop(t + 0.5);
+  } catch (e) { /* 声音失败不影响摸猫 */ }
+}
+
+function pet(clientX, clientY) {
+  const layer = $('petLayer');
+  if (!layer) return;
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const spawn = (svg, size, i) => {
+    const s = document.createElement('span');
+    s.className = 'pet';
+    s.style.left = clientX + 'px';
+    s.style.top = clientY + 'px';
+    s.style.width = s.style.height = size + 'px';
+    s.style.setProperty('--dx', (Math.random() * 56 - 28).toFixed(0) + 'px');
+    s.style.setProperty('--r', (Math.random() * 40 - 20).toFixed(0) + 'deg');
+    s.style.setProperty('--s', (0.85 + Math.random() * 0.4).toFixed(2));
+    s.style.animationDelay = (reduced ? 0 : i * 70) + 'ms';
+    s.innerHTML = svg;
+    layer.appendChild(s);
+    setTimeout(() => s.remove(), 1350 + i * 70);
+  };
+  spawn(PET_PAW, 30, 0);
+  const hearts = reduced ? 1 : 3;                     // 减少动态效果时只留一枚
+  for (let i = 0; i < hearts; i++) spawn(PET_HEART, 16 + Math.random() * 12, i + 1);
+  if ($('meow').checked) meow();
+}
+
+/* =========================================================
    控件
    ========================================================= */
 function syncMode() {
@@ -498,24 +562,40 @@ canvas.addEventListener('contextmenu', (e) => {
   saveMosaic();
 });
 
-// 手机长按同理：压住 0.6 秒存带水印版（原生菜单已被 CSS 关掉）
-let pressTimer = null, pressXY = null;
+// 手机长按同理：压住 0.6 秒存带水印版（原生菜单已被 CSS 关掉）；
+// 轻点（<0.6s 且没滑动）则算「摸猫」
+let pressTimer = null, pressXY = null, pressT0 = 0, pressMoved = false;
 canvas.addEventListener('pointerdown', (e) => {
   pressXY = { x: e.clientX, y: e.clientY };
+  pressT0 = Date.now();
+  pressMoved = false;
+  if (e.button && e.button !== 0) return;             // 右键走 contextmenu 存图
   pressTimer = setTimeout(saveMosaic, 600);
 });
 ['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) =>
-  canvas.addEventListener(ev, () => { clearTimeout(pressTimer); }));
+  canvas.addEventListener(ev, (e) => {
+    clearTimeout(pressTimer);
+    if (ev === 'pointerup' && pressXY && !pressMoved && Date.now() - pressT0 < 600) {
+      pet(e.clientX, e.clientY);
+      pressXY = null;
+    }
+  }));
 canvas.addEventListener('pointermove', (e) => {
-  // 手指滑动（想滚动页面）就不算长按
+  // 手指滑动（想滚动页面）就不算长按，也不算摸
   if (pressXY && (Math.abs(e.clientX - pressXY.x) > 10 || Math.abs(e.clientY - pressXY.y) > 10)) {
     clearTimeout(pressTimer);
+    pressMoved = true;
   }
 });
   $('infoBtn').addEventListener('click', () => {
     const on = document.body.classList.toggle('hide-overview');
     $('infoBtn').setAttribute('aria-pressed', String(!on));
     $('infoBtn').title = on ? '显示总览' : '只显示拼贴';
+  });
+  // 喵声开关：默认开，记住访客偏好
+  $('meow').checked = localStorage.getItem('meowwall.meow') !== '0';
+  $('meow').addEventListener('change', () => {
+    localStorage.setItem('meowwall.meow', $('meow').checked ? '1' : '0');
   });
 }
 

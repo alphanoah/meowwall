@@ -178,3 +178,16 @@ body.hide-overview .overview.ready{opacity:0;transform:translateY(-6px);}
 @media (max-width:420px){
   #widgetLayer{--wclear:150px;}
 }
+
+/* ---------- 摸摸猫：点击冒出的猫爪 + 爱心 ---------- */
+#petLayer{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:6;}
+.pet{
+  position:absolute;pointer-events:none;opacity:0;
+  animation:petup .95s cubic-bezier(.22,.9,.35,1) forwards;
+  filter:drop-shadow(0 2px 3px rgba(90,60,30,.25));
+}
+@keyframes petup{
+  0%{opacity:0;transform:translate(-50%,-50%) scale(.3) rotate(var(--r,0deg));}
+  16%{opacity:1;}
+  100%{opacity:0;transform:translate(calc(-50% + var(--dx,0px)),calc(-50% - 78px)) scale(var(--s,1)) rotate(0deg);}
+}

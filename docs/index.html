@@ -55,10 +55,16 @@
       <input type="checkbox" id="widgetToggle" checked>
       <span>小挂件</span>
     </label>
+    <label class="ctl switch" title="摸猫的时候会喵一声（点一下大猫头试试）">
+      <input type="checkbox" id="meow" checked>
+      <span>喵声</span>
+    </label>
     <button class="btn-primary" id="shuffle" type="button">换一种排法</button>
     <button class="btn-soft" id="download" type="button" title="下载的整张图会带上 Theo 水印">下载这张</button>
   </div>
 </footer>
+
+<div id="petLayer" aria-hidden="true"></div>
 
 <script src="share.js"></script>
 <script src="widgets.js" defer></script>
