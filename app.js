@@ -1,5 +1,5 @@
 /* =========================================================
-   猫咪头像墙 · 上门喂猫拍照记录 + 大猫头拼贴
+   喵星人头像墙 · 上门喂猫拍照记录 + 大猫头拼贴
    ========================================================= */
 
 /* ---------- 猫头轮廓（唯一真源，与 index.html 中的 logo 一致） ---------- */
@@ -49,7 +49,7 @@ function dateOffset(days) {
 }
 
 /* ---------- 名字解析（统计用） ---------- */
-// 名字以「合照」开头 = 多只猫的合影，不算一只猫
+// 名字以「合照」开头 = 多个喵星人的合影，不算一个喵星人
 const isGroupName = (name) => /^合照/.test(String(name || '').trim());
 
 // 从「波波(8)」里取出客户编号「8」；没有括号则返回空串
@@ -58,7 +58,7 @@ function idOf(name) {
   return m ? m[1].trim() : '';
 }
 
-// pid：订单/家庭编号（一户多只猫共用）。与名字括号里的 id 双向同步：
+// pid：订单/家庭编号（一户多个喵星人共用）。与名字括号里的 id 双向同步：
 // 上传时从文件名自动填；改名字括号 → pid 跟着变；组头改 pid → 名字括号跟着变。
 // 旧记录没有 pid 字段时，回落到从名字括号提取（兼容历史数据，无需迁移）。
 const pidOf = (p) => {
@@ -351,7 +351,7 @@ function croppedThumb(rec) {
 }
 
 /* =========================================================
-   文件名解析：客户id-猫咪名称-地址（地址可省略）
+   文件名解析：客户id-喵星人名称-地址（地址可省略）
 
    例：8-波波.png      -> 波波(8)
        8-all.JPG      -> 合照(8)
@@ -361,15 +361,15 @@ function parseFileName(fileName) {
   const base = String(fileName || '').replace(/\.[^.]+$/, '').trim();
   if (!base) return null;
   const parts = base.split('-').map((s) => s.trim());
-  // 只有「数字-猫名-地址」格式才自动填；第一段不是纯数字（比如中文猫名开头）一律不自动填，手动补
+  // 只有「数字-喵星人名-地址」格式才自动填；第一段不是纯数字（比如中文喵星人名开头）一律不自动填，手动补
   if (!/^\d+$/.test(parts[0])) return null;
   const id = parts[0];
   const catRaw = parts[1] || '';
   const place = parts.slice(2).filter(Boolean).join('-');
   let name;
-  if (/^all$/i.test(catRaw)) name = '合照';        // all = 所有猫的合照
+  if (/^all$/i.test(catRaw)) name = '合照';        // all = 所有喵星人的合照
   else if (catRaw) name = catRaw;
-  else name = '猫咪';
+  else name = '喵星人';
   return { name, pid: id, place };
 }
 
@@ -516,7 +516,7 @@ function buildDemoPhotos() {
     return {
       id: 'demo-' + i, demo: true,
       name, date: d, place,
-      note: isGroupName(name) ? '示例：几只猫凑在一起拍的' : '示例记录，可以直接改着看效果',
+      note: isGroupName(name) ? '示例：几个喵星人凑在一起拍的' : '示例记录，可以直接改着看效果',
       w: c.width, h: c.height, createdAt: Date.now() - i,
       _bitmap: c, _thumbUrl: c.toDataURL('image/jpeg', 0.72)
     };
@@ -562,7 +562,7 @@ function leaveDemoForReal() {
 /* =========================================================
    列表渲染
    ========================================================= */
-function catNameOf(p) { return (p.name || '').trim() || '未命名猫咪'; }
+function catNameOf(p) { return (p.name || '').trim() || '未命名喵星人'; }
 
 /* 分组：pid 相同的照片归为一户（订单/家庭）。
    · 没有编号的照片各自独立一组（组头可补填编号归组）
@@ -629,7 +629,7 @@ function renderList() {
       el.innerHTML = `
         <div class="thumb"><img alt="${catNameOf(p)}" src="${p._thumbUrl}">${isGroupName(p.name) ? '<span class="badge-group">合照</span>' : ''}</div>
         <div class="meta">
-          <input class="f-name" data-k="name" placeholder="猫咪名字" value="${escapeAttr(p.name)}">
+          <input class="f-name" data-k="name" placeholder="喵星人名字" value="${escapeAttr(p.name)}">
           <input class="f-note" data-k="note" placeholder="备注：吃了几口、便便、精神状态…" value="${escapeAttr(p.note)}">
           <div class="card-foot">
             <button class="mini-btn" data-act="crop" title="裁剪这张照片（原图会保留）">裁剪</button>
@@ -654,15 +654,15 @@ function escapeAttr(s) {
 
 /* 统计口径（编号一律看 pid 字段，名字里不再带编号）：
    · 照片   = 总张数
-   · 猫咪   = 同一户内的猫咪名去重（不同户的同名猫算两只）；合照不算猫；
-              完全没填名字的照片整体算作 1 只「未命名猫」
+   · 喵星人 = 同一户内的名字去重（不同户的同名喵星人各算一个）；合照不算喵星人；
+              完全没填名字的照片整体算作 1 个「未命名喵星人」
    · 客户   = pid 去重（一户一位）；没有编号的照片单独计：
               每张未命名照片算一位，有名字但没编号的合起来算一位
    改了名字或编号后，这里会跟着重新统计。 */
 function renderStats() {
   $('statPhotos').textContent = photos.length;
 
-  const catKeys = new Set();   // 猫咪去重键 = 户编号 + 名字（避免不同客户同名猫混在一起）
+  const catKeys = new Set();   // 喵星人去重键 = 户编号 + 名字（避免不同客户同名混在一起）
   const clientIds = new Set(); // 有编号的客户（pid 去重）
   let unnamed = 0;             // 完全没填名字的照片
   let namedNoId = 0;           // 有名字但没有编号的照片
@@ -1121,7 +1121,7 @@ function renderMosaic(report) {
     ctx.font = '600 40px system-ui,-apple-system,"PingFang SC",sans-serif';
     ctx.fillText('还没有照片', 500, 540);
     ctx.font = '400 26px system-ui,-apple-system,"PingFang SC",sans-serif';
-    ctx.fillText('上传喂猫时拍的猫咪头像', 500, 590);
+    ctx.fillText('上传喂猫时拍的喵星人头像', 500, 590);
     ctx.fillText('它们会拼成这个猫头', 500, 628);
   }
 
@@ -1231,7 +1231,7 @@ function zipStore(files) {
 
 async function blobBytes(b) { return new Uint8Array(await b.arrayBuffer()); }
 
-// —— 照片文件名：客户id-猫咪名（有 id 不会重名）；没名字/id 的给随机 ID ——
+// —— 照片文件名：客户id-喵星人名（有 id 不会重名）；没名字/id 的给随机 ID ——
 function photoFileBase(rec) {
   const name = (rec.name || '').trim();
   const id = String(rec.pid ?? '').trim().replace(/[\\/:*?"<>|]/g, '');
@@ -1335,7 +1335,7 @@ async function exportZip() {
   const zip = zipStore(files);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(zip);
-  a.download = `猫咪照片包-${todayISO()}.zip`;
+  a.download = `喵星人照片包-${todayISO()}.zip`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 8000);
   toast(`图片包已保存到下载文件夹（${files.length - 1} 张照片 + 拼图 + 清单）`);
@@ -1344,9 +1344,9 @@ async function exportZip() {
 /* =========================================================
    发布到网站（GitHub Pages）
    产出（路径都相对 docs/）：
-     docs/meowtonians/<客户id-猫名>.jpg   成品图（可选叠加水印）
+     docs/meowtonians/<客户id-喵星人名>.jpg   成品图（可选叠加水印）
      docs/meowtonians/拼贴-大猫头.png     分享缩略图（og:image）
-     docs/photos.json                    照片清单（只含文件名与猫名）
+     docs/photos.json                    照片清单（只含文件名与喵星人名）
    发布直接写进项目里的 docs/（File System Access API，Chrome/Edge），
    不用再解压；浏览器不支持时退回下载一个同样的 zip 包。
    docs/ 里的 index.html / share.css / share.js 是仓库里的页面源文件，
@@ -1423,7 +1423,7 @@ async function watermarkBlob(blob, clipCat) {
   return await new Promise((r) => c.toBlob((b) => r(b), 'image/png'));
 }
 
-// 站点文案里的「N 只喵星人」：同一户内名字去重、合照不算（和工作台统计口径一致）
+// 站点文案里的「N 个喵星人」：同一户内名字去重、合照不算（和工作台统计口径一致）
 function siteCatCount() {
   const src = (demoActive ? (demoSnapshot || []) : photos).filter((p) => !p.demo && p._bitmap);
   const keys = new Set();
@@ -1461,7 +1461,7 @@ async function buildSiteFiles(watermark) {
       if (!blob) continue;
       const fname = uniqueName(photoFileBase(rec), 'jpg', used);
       files.push({ path: `${SITE_PHOTO_DIR}/${fname}`, data: await blobBytes(blob) });
-      // 隐私：清单只带文件名和猫名，不带地址/日期/备注/编号
+      // 隐私：清单只带文件名和喵星人名，不带地址/日期/备注/编号
       manifest.photos.push({ file: `${SITE_PHOTO_DIR}/${fname}`, name: (rec.name || '').trim() });
     } catch (e) { console.warn('一张照片发布失败，已跳过', e); }
     done++;
@@ -1525,7 +1525,7 @@ async function looksLikeProjectRoot(h) {
 async function confirmPickedRoot(root) {
   if (root.name === 'docs') return;
   if (await looksLikeProjectRoot(root)) return;
-  const ok = confirm(`「${root.name}」里没看到 index.html / app.js，看起来不是猫咪头像墙的项目文件夹。\n\n照片会被写进 ${root.name}/docs/，确定继续吗？`);
+  const ok = confirm(`「${root.name}」里没看到 index.html / app.js，看起来不是喵星人头像墙的项目文件夹。\n\n照片会被写进 ${root.name}/docs/，确定继续吗？`);
   if (!ok) throw new DOMException('用户取消了', 'AbortError');
 }
 
@@ -1573,7 +1573,7 @@ function downloadSiteZip(files) {
   const zip = zipStore(files.map((f) => ({ name: `${SITE_DIR}/${f.path}`, data: f.data })));
   const a = document.createElement('a');
   a.href = URL.createObjectURL(zip);
-  a.download = `猫咪头像墙-发布包-${todayISO()}.zip`;
+  a.download = `喵星人头像墙-发布包-${todayISO()}.zip`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 8000);
 }
@@ -1644,7 +1644,7 @@ function openPublishModal() {
   const n = (demoActive ? (demoSnapshot || []) : photos).filter((p) => !p.demo && p._bitmap).length;
   if (!n) return toast('还没有照片可以发布');
   $('pubCount').textContent = `${n} 张照片`;
-  $('pubCatCount').textContent = `${siteCatCount()} 只喵星人`;
+  $('pubCatCount').textContent = `${siteCatCount()} 个喵星人`;
   drawWmPreview();
   refreshPubDirHint();
   $('publishModal').classList.add('show');
@@ -1706,11 +1706,11 @@ $('pubGo').addEventListener('click', async () => {
    下载
    ========================================================= */
 function download() {
-  if (!photos.length) return toast('先上传几张猫咪照片吧');
+  if (!photos.length) return toast('先上传几张喵星人的照片吧');
   canvas.toBlob((blob) => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `猫咪头像墙-${todayISO()}.png`;
+    a.download = `喵星人头像墙-${todayISO()}.png`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     toast('拼图已保存到下载文件夹');
@@ -1766,7 +1766,7 @@ async function exportBackup() {
   if (!built) return toast('没有可备份的真实照片（示例照片不会备份；如果刚清空过，请先导入备份或重新上传）');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(built.blob);
-  a.download = `猫咪头像墙备份-${todayISO()}.zip`;
+  a.download = `喵星人头像墙备份-${todayISO()}.zip`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 8000);
   toast(`备份已保存到下载文件夹（${built.count} 张照片）`);
@@ -1861,7 +1861,7 @@ async function importBackup(file) {
   try { data = JSON.parse(await file.text()); }
   catch (e) { return toast('这个文件不是有效的备份（无法解析）'); }
   if (!data || data.app !== 'catsmap' || !Array.isArray(data.photos)) {
-    return toast('这个文件不是「猫咪头像墙」的备份');
+    return toast('这个文件不是「喵星人头像墙」的备份');
   }
   const items = data.photos;
   if (!items.length) return toast('备份里没有照片');
@@ -1912,7 +1912,7 @@ async function importBackupZip(file) {
   try { data = JSON.parse(new TextDecoder().decode(rawMf)); }
   catch (e) { return toast('备份包清单无法解析'); }
   if (!data || data.app !== 'catsmap' || !Array.isArray(data.photos)) {
-    return toast('这个文件不是「猫咪头像墙」的备份');
+    return toast('这个文件不是「喵星人头像墙」的备份');
   }
   const items = data.photos;
   if (!items.length) return toast('备份包里没有照片');

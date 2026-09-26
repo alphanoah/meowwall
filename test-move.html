@@ -132,7 +132,7 @@ function runChecks(win, doc) {
   chk(gs2.length === 3 && q('.f-pid', gs2[0]).value === '', '未编号组排最前、共 3 组', pids());
   chk(namesIn(gs2[0]) === '屁屁', '屁屁回到未编号组', namesIn(gs2[0]));
   chk(q('#statClients').textContent === '3', '客户数：91/90 两位 + 有名无编号一位', q('#statClients').textContent);
-  chk(q('#statCats').textContent === '4', '猫咪数不变', q('#statCats').textContent);
+  chk(q('#statCats').textContent === '4', '喵星人数不变', q('#statCats').textContent);
 
   // —— 合照移到别的组，仍排组内最后 ——
   q('[data-act="move"]', qa('.card', gByPid('91')).find((c) => q('.f-name', c).value === '合照')).click();

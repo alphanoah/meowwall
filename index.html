@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>猫咪头像墙 · 上门喂猫拍照记录</title>
+<title>喵星人头像墙 · 上门喂猫拍照记录</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,14 +16,14 @@
       </svg>
     </span>
     <div class="brand-txt">
-      <h1>猫咪头像墙</h1>
+      <h1>喵星人头像墙</h1>
       <p>上门喂猫 · 每一次探访，都留下一个小猫头</p>
     </div>
   </div>
   <div class="topbar-right">
     <div class="stats" id="stats">
       <div class="stat"><b id="statPhotos">0</b><span>张照片</span></div>
-      <div class="stat"><b id="statCats">0</b><span>只猫咪</span></div>
+      <div class="stat"><b id="statCats">0</b><span>个喵星人</span></div>
       <div class="stat"><b id="statClients">0</b><span>位客户</span></div>
       <div class="stat"><b id="statLast">—</b><span>最近探访</span></div>
     </div>
@@ -50,7 +50,7 @@
     <div class="panel-head">
       <h2>探访照片</h2>
       <div class="head-btns">
-        <button class="btn-ghost" id="zipBtn" title="把裁剪后的照片、拼贴大猫头和记录清单打包成 zip">导出图片包</button>
+        <button class="btn-ghost" id="zipBtn" title="把裁剪后的照片、喵星人大头拼贴和记录清单打包成 zip">导出图片包</button>
         <button class="btn-ghost" id="exportBtn" title="把全部照片和记录打包成一个 zip 文件（原图 + 记录清单，体积小）">导出备份</button>
         <button class="btn-ghost" id="importBtn" title="从备份文件恢复照片和记录（支持新版 zip 和旧版 json）">导入恢复</button>
         <button class="btn-ghost" id="clearAll">清空全部</button>
@@ -65,7 +65,7 @@
       </div>
       <p class="dz-title">把拍到的猫猫拖进来</p>
       <p class="dz-hint">或点击下方按钮选择 / 现场拍照，支持一次多张</p>
-      <p class="dz-rule">文件名写成 <b>客户id-猫咪名称-地址</b>（地址可省略）会自动填好<br>
+      <p class="dz-rule">文件名写成 <b>客户id-喵星人名称-地址</b>（地址可省略）会自动填好<br>
         如 <b>8-波波.png</b> → 波波(8)　<b>8-all.JPG</b> → 合照(8)</p>
       <div class="dz-btns">
         <button class="btn-primary" id="pickBtn">选择照片</button>
@@ -90,7 +90,7 @@
   <!-- 右：大猫头拼贴 -->
   <section class="panel panel-right">
     <div class="panel-head">
-      <h2>大猫咪头 · 照片拼贴</h2>
+      <h2>喵星人大头像 · 照片拼贴</h2>
       <span class="tag" id="mosaicTag">—</span>
     </div>
 
@@ -173,7 +173,7 @@
       </div>
     </div>
 
-    <p class="crop-hint">拖动方框可移动，拖四个角可缩放。想把猫脸放大一点，就缩小方框只框住脸。</p>
+    <p class="crop-hint">拖动方框可移动，拖四个角可缩放。想把喵星人的脸放大一点，就缩小方框只框住脸。</p>
 
     <div class="crop-actions">
       <button class="btn-ghost" id="cropReset">重置成原图</button>
@@ -239,7 +239,7 @@
       <span class="pub-preview-lbl">水印在深浅底上的效果预览</span>
     </div>
 
-    <p class="pub-hint">只有发布出来的图片带水印，你库里的原图不受影响。清单里只写文件名和猫名，不含地址、日期、备注和客户编号。</p>
+    <p class="pub-hint">只有发布出来的图片带水印，你库里的原图不受影响。清单里只写文件名和喵星人名字，不含地址、日期、备注和客户编号。</p>
 
     <div class="move-actions">
       <span class="crop-spacer"></span>

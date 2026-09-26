@@ -89,8 +89,8 @@ function runChecks(win, doc) {
 
   chk(qa('.card .f-name', g91).length === 1 && q('.card .f-name', g91).value === '波波', '订单 91 一张（纯名）');
 
-  // 统计：4 猫咪（奶牛/咪咪/合照不算/波波）+ 3 客户（90/91/无编号算1）
-  chk(q('#statCats').textContent === '4', '统计：4 只猫咪', q('#statCats').textContent);
+  // 统计：4 喵星人（奶牛/咪咪/合照不算/波波）+ 3 客户（90/91/无编号算1）
+  chk(q('#statCats').textContent === '4', '统计：4 个喵星人', q('#statCats').textContent);
   chk(q('#statClients').textContent === '3', '统计：3 位客户', q('#statClients').textContent);
 
   // 组头改地址 → 整组生效

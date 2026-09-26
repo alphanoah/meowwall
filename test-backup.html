@@ -71,7 +71,7 @@ function runChecks(win, doc) {
       const warns = [];
       const origWarn = win.console.warn;
       win.console.warn = (...a) => warns.push(a.map(String).join(' '));
-      const zipFile = new File([u8], '猫咪头像墙备份-2026-09-23.zip', { type: 'application/zip' });
+      const zipFile = new File([u8], '喵星人头像墙备份-2026-09-23.zip', { type: 'application/zip' });
       await win.importBackup(zipFile);
       await new Promise((r) => setTimeout(r, 800));
       win.console.warn = origWarn;
@@ -91,7 +91,7 @@ function runChecks(win, doc) {
       const pack = [...entries.entries()].map(([name, data]) => ({ name, data }));
       const junk = (n) => ({ name: n, data: new TextEncoder().encode('junk') });
       const variants = [
-        ['外层多一层文件夹', pack.map((f) => ({ name: '猫咪头像墙备份-2026-09-23/' + f.name, data: f.data }))],
+        ['外层多一层文件夹', pack.map((f) => ({ name: '喵星人头像墙备份-2026-09-23/' + f.name, data: f.data }))],
         ['多一层文件夹 + macOS 元数据', [
           ...pack.map((f) => ({ name: 'bak/' + f.name, data: f.data })),
           junk('__MACOSX/._manifest.json'), junk('__MACOSX/bak/photos/._x.jpg'),

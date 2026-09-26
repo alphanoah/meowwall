@@ -375,7 +375,7 @@ function renderOverview() {
   const el = $('overview');
   const n = (meta && Number(meta.cats)) || photos.length;
   const when = (meta && meta.updatedAt) ? fmtMonth(meta.updatedAt) : '';
-  el.innerHTML = `${pawSvg()}<b>${n}</b> 只喵星人${when ? `<span class="ov-when">· 更新于 ${when}</span>` : ''}`;
+  el.innerHTML = `${pawSvg()}<b>${n}</b> 个喵星人${when ? `<span class="ov-when">· 更新于 ${when}</span>` : ''}`;
   el.classList.add('ready');
 }
 
