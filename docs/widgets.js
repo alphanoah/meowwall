@@ -91,13 +91,9 @@
   /* ---------- 3. 角落氛围组：呼吸睡猫 + 滚动毛线球 + Zzz，随机角落 ---------- */
   var cornerSvg = (function () {
     var corner = pick(['bl', 'br', 'tl', 'tr']);
-    var flipX = corner.charAt(1) === 'r';          // 右侧角落整体镜像，睡猫脸朝内
-    var flipY = corner.charAt(0) === 't';          // 顶部角落垂直翻转（挂在「架上」的感觉）
-    var side = flipX ? 'right:18px;' : 'left:18px;';
-    var vert = flipY ? 'top:14px;' : 'bottom:64px;';
-    var inner = (flipX ? 'scale(-1 1) ' : '') + (flipY ? 'scale(1 -1)' : '');
-    var tf = (inner.trim() === '') ? '' : ' transform="' + inner.trim() + '"';
-    return '<div class="wcorner" style="' + side + vert + '">'
+    var flipX = corner.charAt(1) === 'r';          // 右侧角落整体镜像，睡猫脸朝内（绕盒子中心翻，别绕原点）
+    var tf = flipX ? ' transform="translate(250 0) scale(-1 1)"' : '';
+    return '<div class="wcorner wc-' + corner + '">'
       + '<svg width="250" height="170" viewBox="0 0 250 170"'
       + ' style="overflow:visible"><g' + tf + '>'
       + '<g transform="translate(96,118)">'

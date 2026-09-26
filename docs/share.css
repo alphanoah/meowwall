@@ -140,13 +140,19 @@ body.hide-overview .overview.ready{opacity:0;transform:translateY(-6px);}
 /* ---------- 小挂件层（脚印 / 溜达小猫 / 角落氛围组） ---------- */
 #widgetLayer{
   position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:2;
+  --wclear:0px;   /* 底部避让高度：给底部控制条让位，手机端加大 */
 }
 #widgetLayer.off{display:none;}
 .wtrail,.wwalker,.wcorner{position:absolute;}
 .wtrail{inset:0;}
+.wcorner{width:250px;height:170px;}
+.wc-bl{left:18px;bottom:calc(64px + var(--wclear,0px));}
+.wc-br{right:18px;bottom:calc(64px + var(--wclear,0px));}
+.wc-tl{left:18px;top:14px;}
+.wc-tr{right:18px;top:14px;}
 .wprint{opacity:0;animation:wprint 6.8s ease-in-out infinite;}
 @keyframes wprint{0%{opacity:0}12%{opacity:.5}50%{opacity:.35}78%{opacity:0}100%{opacity:0}}
-.wwalker{left:0;right:0;bottom:var(--wbottom,6px);animation:wwalk var(--wdur,13s) linear infinite;}
+.wwalker{left:0;right:0;bottom:calc(var(--wbottom,6px) + var(--wclear,0px));animation:wwalk var(--wdur,13s) linear infinite;}
 .wwalker.wrev{animation-name:wwalk-rev;}
 @keyframes wwalk{from{transform:translateX(-200px)}to{transform:translateX(100vw)}}
 @keyframes wwalk-rev{from{transform:translateX(100vw)}to{transform:translateX(-200px)}}
@@ -164,3 +170,11 @@ body.hide-overview .overview.ready{opacity:0;transform:translateY(-6px);}
 .wz{opacity:0;animation:wz 4.5s ease-out infinite;}
 .wz2{animation-delay:1.5s;}.wz3{animation-delay:3s;}
 @keyframes wz{0%{opacity:0;transform:translateY(6px)}25%{opacity:.75}70%{opacity:.3;transform:translateY(-14px)}100%{opacity:0;transform:translateY(-22px)}}
+
+/* 手机上控制条更高（换行 + 安全区），挂件整体抬到它上面 —— 必须写在基础规则后面才能盖过 --wclear:0px */
+@media (max-width:760px){
+  #widgetLayer{--wclear:118px;}
+}
+@media (max-width:420px){
+  #widgetLayer{--wclear:150px;}
+}
