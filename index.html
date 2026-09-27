@@ -52,7 +52,7 @@
       <div class="head-btns">
         <button class="btn-ghost" id="zipBtn" title="把裁剪后的照片、喵星人大头拼贴和记录清单打包成 zip">导出图片包</button>
         <button class="btn-ghost" id="exportBtn" title="把全部照片和记录打包成一个 zip 文件（原图 + 记录清单，体积小）">导出备份</button>
-        <button class="btn-ghost" id="importBtn" title="从备份文件恢复照片和记录（支持新版 zip 和旧版 json）">导入恢复</button>
+        <button class="btn-ghost" id="importBtn" title="从备份文件恢复照片和记录（zip 包）">导入恢复</button>
         <button class="btn-ghost" id="clearAll">清空全部</button>
       </div>
     </div>
@@ -76,7 +76,7 @@
 
     <input type="file" id="fileInput" accept="image/*" multiple hidden>
     <input type="file" id="cameraInput" accept="image/*" capture="environment" hidden>
-    <input type="file" id="importInput" accept=".zip,.json,application/zip,application/json" hidden>
+    <input type="file" id="importInput" accept=".zip,application/zip" hidden>
 
     <div class="list-head">
       <span>照片记录</span>
@@ -231,7 +231,13 @@
 
     <label class="pub-wm">
       <input type="checkbox" id="pubWatermark" checked>
-      <span>给图片叠加水印 <em>Theo + 小猫爪，对角密排</em></span>
+      <span>给图片叠加水印 <em id="wmLabel">Theo + 小猫爪，对角密排</em></span>
+    </label>
+
+    <label class="pub-wmrow" id="wmTextRow">
+      <span>水印文字</span>
+      <input type="text" id="wmTextInput" maxlength="24" placeholder="Theo" spellcheck="false">
+      <em>改成你自己的名字或招牌，留空恢复默认 Theo；访客页下载水印同步使用</em>
     </label>
 
     <div class="pub-preview">

@@ -1353,7 +1353,8 @@ async function exportZip() {
    发布不覆盖它们，只往 docs/meowtonians/ 和 docs/photos.json 放东西。
    ========================================================= */
 
-const WATERMARK_TEXT = 'Theo';
+const WM_DEFAULT = 'Theo';
+let wmText = localStorage.getItem('catsmap.wmText') || WM_DEFAULT;   // 水印文字（发布面板可改，会记住）
 const SITE_DIR = 'docs';                     // GitHub Pages 从这里发布
 const SITE_PHOTO_DIR = 'meowtonians';        // 站点内的照片目录
 const PUB_DIR_KEY = 'publishDir';            // 「上次选的项目文件夹」句柄的键
@@ -1371,7 +1372,7 @@ function pawAt(cx, x, y, s) {
   cx.stroke();
 }
 
-/* 对角密排铺满整张图：每个单元 = 小猫爪 + 「Theo」。
+/* 对角密排铺满整张图：每个单元 = 小猫爪 + 水印文字。
    白色半透明 + 极淡深色描边，浅底深底都能看见一点；因为密排，
    透明度压得很低也不会看不见，同时对拼贴观感的干扰很小。 */
 function drawWatermark(cx, w, h) {
@@ -1395,8 +1396,8 @@ function drawWatermark(cx, w, h) {
     for (let x = -span / 2; x <= span / 2; x += unit) {
       const px = x + offset;
       pawAt(cx, px, y - fs * 0.62, paw);
-      cx.strokeText(WATERMARK_TEXT, px, y + fs * 0.72);
-      cx.fillText(WATERMARK_TEXT, px, y + fs * 0.72);
+      cx.strokeText(wmText, px, y + fs * 0.72);
+      cx.fillText(wmText, px, y + fs * 0.72);
     }
   }
   cx.restore();
@@ -1451,6 +1452,7 @@ async function buildSiteFiles(watermark) {
     updatedAt: new Date().toISOString(),
     count: 0, cats: 0,
     mosaic: `${SITE_PHOTO_DIR}/拼贴-大猫头.png`,
+    watermark: wmText,                       // 访客页下载水印用同一个词
     photos: []
   };
 
@@ -1645,6 +1647,7 @@ function openPublishModal() {
   if (!n) return toast('还没有照片可以发布');
   $('pubCount').textContent = `${n} 张照片`;
   $('pubCatCount').textContent = `${siteCatCount()} 个喵星人`;
+  $('wmTextInput').value = wmText === WM_DEFAULT ? '' : wmText;
   drawWmPreview();
   refreshPubDirHint();
   $('publishModal').classList.add('show');
@@ -1687,6 +1690,14 @@ $('publishModal').addEventListener('click', (e) => { if (e.target === $('publish
 $('pubWatermark').addEventListener('change', () => {
   $('wmPreview').style.opacity = $('pubWatermark').checked ? '1' : '.28';
 });
+// 水印文字：输入即生效（预览刷新 + 记住偏好），留空恢复默认 Theo
+$('wmTextInput').addEventListener('input', () => {
+  const v = $('wmTextInput').value.trim();
+  wmText = v || WM_DEFAULT;
+  localStorage.setItem('catsmap.wmText', wmText);
+  $('wmLabel').textContent = `${wmText} + 小猫爪，对角密排`;
+  drawWmPreview();
+});
 $('pubDirChange').addEventListener('click', async () => {
   try {
     await pickPubDir();
@@ -1726,10 +1737,9 @@ const blobToDataURL = (b) => new Promise((resolve, reject) => {
   r.onerror = () => reject(r.error);
   r.readAsDataURL(b);
 });
-const dataURLToBlob = async (u) => await (await fetch(u)).blob();
 
 /* 备份 = ZIP 包：原图二进制（不 base64，体积省约 1/3）+ manifest.json 元数据。
-   缩略图不入包，导入时从原图重新生成。旧版 JSON 备份导入仍然兼容。 */
+   缩略图不入包，导入时从原图重新生成。 */
 async function buildBackupBlob() {
   let rows = [];
   try { rows = await dbAll(); } catch (e) { /* 存储不可用时退回内存里的照片 */ }
@@ -1854,48 +1864,8 @@ function zipFind(entries, want) {
 async function importBackup(file) {
   if (!file) return;
   const isZip = /\.zip$/i.test(file.name) || String(file.type || '').includes('zip');
-  if (isZip) return importBackupZip(file);
-
-  // 旧版 JSON 备份（图片是 base64 dataURL）
-  let data;
-  try { data = JSON.parse(await file.text()); }
-  catch (e) { return toast('这个文件不是有效的备份（无法解析）'); }
-  if (!data || data.app !== 'catsmap' || !Array.isArray(data.photos)) {
-    return toast('这个文件不是「喵星人头像墙」的备份');
-  }
-  const items = data.photos;
-  if (!items.length) return toast('备份里没有照片');
-  if (!confirm(`导入 ${items.length} 张照片？将与现有记录按编号合并，同编号的会覆盖。`)) return;
-
-  if (demoActive) { leaveDemoForReal(); renderList(); renderMosaic(true); }
-  toast(`正在导入 ${items.length} 张照片…`);
-  let ok = 0;
-  for (const it of items) {
-    try {
-      if (!it.img) continue;
-      const blob = await dataURLToBlob(it.img);
-      const thumb = it.thumb ? await dataURLToBlob(it.thumb) : blob;
-      const rec = {
-        id: it.id || uid(), name: it.name || '', pid: it.pid || idOf(it.name || '') || '',
-        date: it.date || todayISO(),
-        place: it.place || '', note: it.note || '',
-        blob, thumb, w: it.w || 0, h: it.h || 0, createdAt: it.createdAt || Date.now(),
-        crop: it.crop || null
-      };
-      stripNameSuffix(rec);                    // 旧备份名字可能带 (id)，拆成纯名 + pid
-      rec._bitmap = await decodeFile(rec.blob);
-      rec._thumbUrl = URL.createObjectURL(thumb);
-      prepareSrc(rec);
-      photos = photos.filter((p) => p.id !== rec.id);
-      photos.unshift(rec);
-      await saveRecord(rec);
-      ok++;
-    } catch (e) { console.warn('有一张导入失败', e); }
-  }
-  renderList();
-  renderMosaic(true);
-  renderStats();
-  toast(ok ? `已恢复 ${ok} 张照片` : '导入失败，请检查备份文件');
+  if (!isZip) return toast('备份是「导出备份」生成的 zip 包，请选择 .zip 文件');
+  return importBackupZip(file);
 }
 
 /* 新版 ZIP 备份导入：photos/*.jpg 原图 + manifest.json 元数据（缩略图重新生成） */

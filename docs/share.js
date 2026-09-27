@@ -309,6 +309,7 @@ async function loadPhotos() {
     return;
   }
   meta = data || {};
+  if (meta.watermark) WM_TEXT = String(meta.watermark);
   const list = (Array.isArray(meta.photos) ? meta.photos : []).filter((p) => p && p.file);
 
   const total = list.length;
@@ -398,7 +399,7 @@ function pawSvg() {
 /* =========================================================
    水印（与工作台 app.js 里的同名函数保持一致，改一边记得同步另一边）
    ========================================================= */
-const WM_TEXT = 'Theo';
+let WM_TEXT = 'Theo';   // 会用 photos.json 里的 watermark 字段覆盖（与工作台发布时填的水印文字一致）
 
 // 一个小猫爪：掌垫 + 四个趾垫（以 (x,y) 为中心，s 为整体宽度）
 function pawAt(cx, x, y, s) {
