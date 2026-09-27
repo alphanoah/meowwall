@@ -1361,15 +1361,23 @@ const SITE_DIR = 'docs';                     // GitHub Pages 从这里发布
 const SITE_PHOTO_DIR = 'meowtonians';        // 站点内的照片目录
 const PUB_DIR_KEY = 'publishDir';            // 「上次选的项目文件夹」句柄的键
 
-// 一个小猫爪：掌垫 + 四个趾垫（以 (x,y) 为中心，s 为整体宽度）
+// 一个小猫爪：掌垫 + 四个趾垫（以 (x,y) 为中心，s 为整体宽度）。
+// 每个椭圆前必须先 moveTo 到它的起点：canvas 的 ellipse 会自动从上一个
+// 椭圆的终点连一条直线过来，不隔开的话描边会画出几条穿过爪子的弦线。
+// 外侧趾垫上提到 -0.36r，避免和掌垫轮廓相交。
 function pawAt(cx, x, y, s) {
   const r = s / 2;
   cx.beginPath();
+  cx.moveTo(x + r * 0.60, y + r * 0.44);   // 掌垫
   cx.ellipse(x, y + r * 0.44, r * 0.60, r * 0.50, 0, 0, Math.PI * 2);
-  cx.ellipse(x - r * 0.60, y - r * 0.26, r * 0.20, r * 0.26, 0, 0, Math.PI * 2);
+  cx.moveTo(x - r * 0.42, y - r * 0.36);   // 左外趾
+  cx.ellipse(x - r * 0.62, y - r * 0.36, r * 0.20, r * 0.26, 0, 0, Math.PI * 2);
+  cx.moveTo(x - r * 0.01, y - r * 0.50);   // 左内趾
   cx.ellipse(x - r * 0.21, y - r * 0.50, r * 0.20, r * 0.27, 0, 0, Math.PI * 2);
+  cx.moveTo(x + r * 0.41, y - r * 0.50);   // 右内趾
   cx.ellipse(x + r * 0.21, y - r * 0.50, r * 0.20, r * 0.27, 0, 0, Math.PI * 2);
-  cx.ellipse(x + r * 0.60, y - r * 0.26, r * 0.20, r * 0.26, 0, 0, Math.PI * 2);
+  cx.moveTo(x + r * 0.82, y - r * 0.36);   // 右外趾
+  cx.ellipse(x + r * 0.62, y - r * 0.36, r * 0.20, r * 0.26, 0, 0, Math.PI * 2);
   cx.fill();
   cx.stroke();
 }
