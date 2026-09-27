@@ -380,6 +380,22 @@ function renderOverview() {
   const when = (meta && meta.updatedAt) ? fmtMonth(meta.updatedAt) : '';
   el.innerHTML = `${pawSvg()}<b>${n}</b> 个喵星人${when ? `<span class="ov-when">· 更新于 ${when}</span>` : ''}`;
   el.classList.add('ready');
+
+  // 目标进度：随 photos.json 的 goal 字段发布（工作台「目标进度」设置）。
+  // 猫咪数 meta.cats 与工作台口径一致（名字去重、合照不算），正好是「已认识」数。
+  const g = meta && meta.goal;
+  const bar = $('goalBar');
+  if (g && Number(g.target) >= 1) {
+    const T = Math.round(Number(g.target));
+    const year = Math.round(Number(g.year)) || new Date().getFullYear();
+    const done = Math.min(n, T);
+    $('goalTxt').innerHTML = `${year} 年已认识 <b>${n}</b> 位喵星人`
+      + (n >= T ? ' · 目标达成 🎉' : ` · 距离 ${T} 位还差 ${T - n} 位`);
+    $('goalFill').style.width = ((done / T) * 100).toFixed(1) + '%';
+    bar.hidden = false;
+  } else {
+    bar.hidden = true;
+  }
 }
 
 function fmtMonth(iso) {

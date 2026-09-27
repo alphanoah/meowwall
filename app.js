@@ -21,7 +21,12 @@ const THUMB_SIZE = 420;
 let photos = [];              // {id,name,date,place,note,blob,thumb,w,h,createdAt,_bitmap,_thumbUrl}
 let seed = 7;
 let storageOK = true;
-let layoutMode = 'auto';      // auto = 按照片数均分 | grid = 几 × 几 铺满
+let layoutMode = localStorage.getItem('catsmap.layoutMode') || 'goal';
+if (!['auto', 'goal', 'grid'].includes(layoutMode)) layoutMode = 'goal';
+// goal = 目标进度（每猫一格 + 空格爪印）| auto = 按照片数均分 | grid = 几 × 几 铺满
+function syncModeButtons() {
+  Array.from($('modeSeg').children).forEach((b) => b.classList.toggle('on', b.dataset.mode === layoutMode));
+}
 let demoActive = false;       // 是否处于示例模式
 let demoSnapshot = null;      // 进入示例前的真实照片（仅内存，退出时原样恢复）
 
@@ -680,7 +685,111 @@ function renderStats() {
 
   const dates = photos.map((p) => p.date).filter(Boolean).sort();
   $('statLast').textContent = dates.length ? dates[dates.length - 1].slice(5).replace('-', '/') : '—';
+  renderGoalCard();
 }
+
+/* ---------- 目标进度 ----------
+   目标 = 一年内「认识的喵星人数」（口径与上面「喵星人」统计一致：
+   名字去重、合照不算、未命名整体算 1 位）。目标数和年份存在 localStorage。 */
+const GOAL_DEFAULT = 100;
+let goal = loadGoal();
+
+function loadGoal() {
+  try {
+    const g = JSON.parse(localStorage.getItem('catsmap.goal') || 'null');
+    if (g && Number(g.target) >= 1) {
+      return { target: Math.min(9999, Math.round(Number(g.target))), year: Math.round(Number(g.year)) || new Date().getFullYear() };
+    }
+  } catch (e) { /* 坏数据就用默认 */ }
+  return { target: GOAL_DEFAULT, year: new Date().getFullYear() };
+}
+function saveGoal() {
+  localStorage.setItem('catsmap.goal', JSON.stringify(goal));
+}
+
+// 喵星人花名册：按「户编号|名字」去重，每只猫的代表照取最新一张；
+// 未命名照片整体算 1 位「未命名喵星人」（代表照取最新一张）；合照不算。
+// 返回按代表照时间升序（最早认识的排前面）。
+function catRoster() {
+  const map = new Map();
+  let unnamedRep = null;
+  const tsOf = (p) => (p.date ? (Date.parse(p.date) || 0) : (p.createdAt || 0));
+  photos.forEach((p) => {
+    const name = (p.name || '').trim();
+    if (!name) {
+      if (!unnamedRep || tsOf(p) > tsOf(unnamedRep)) unnamedRep = p;
+      return;
+    }
+    if (isGroupName(name)) return;                     // 合照不算喵星人
+    const pid = String(p.pid ?? '').trim() || idOf(name);
+    const key = (pid || '#') + '|' + name;
+    const cur = map.get(key);
+    if (!cur || tsOf(p) > tsOf(cur.rep)) map.set(key, { key, name, pid, rep: p });
+  });
+  const list = [...map.values()];
+  if (unnamedRep) list.push({ key: '#|__unnamed__', name: '未命名喵星人', pid: '', rep: unnamedRep, unnamed: true });
+  list.sort((a, b) => tsOf(a.rep) - tsOf(b.rep));
+  return list;
+}
+
+// 目标格数：在现有档位（MAIN_CELLS 表）里挑「主体格数最接近目标」的列数，
+// 拼贴画布形状固定，格子数没法正好等于目标，取最近档（如 100 → 16 列 98 格）
+function goalGridOf(target) {
+  let best = null;
+  for (let c = 5; c <= 22; c++) {
+    const cells = mainCellsOf(c);
+    const diff = Math.abs(cells - target);
+    if (!best || diff < best.diff) best = { cols: c, rows: gridRowsOf(c), cells, diff };
+  }
+  return best;
+}
+
+function renderGoalCard() {
+  const known = catRoster().length;
+  const T = goal.target;
+  const now = new Date();
+  const inYear = now.getFullYear() === goal.year;
+
+  $('goalTitle').textContent = `${goal.year} 年目标 · ${known} / ${T} 位喵星人`;
+  $('goalLeft').textContent = known >= T ? '已达成 🎉' : `还差 ${T - known} 位`;
+  const pct = Math.max(0, Math.min(100, (known / T) * 100));
+  $('goalFill').style.width = pct.toFixed(1) + '%';
+
+  const mark = $('goalMark');
+  const note = $('goalNote');
+  if (inYear) {
+    const start = new Date(now.getFullYear(), 0, 1);
+    const end = new Date(now.getFullYear() + 1, 0, 1);
+    const timePct = ((now - start) / (end - start)) * 100;
+    mark.style.display = '';
+    mark.style.left = timePct.toFixed(1) + '%';
+    if (known >= T) {
+      note.textContent = `${goal.year} 年的小目标达成啦，多出来的都是意外之喜`;
+    } else {
+      const diff = timePct - pct;
+      note.textContent = Math.abs(diff) < 3
+        ? '进度刚好跟上时间，保持这个节奏'
+        : diff > 0
+          ? `落后时间进度 ${Math.round(diff)}%，最近要多上门啦`
+          : `比时间进度快了 ${Math.round(-diff)}%，稳！`;
+    }
+  } else {
+    mark.style.display = 'none';
+    note.textContent = `${goal.year} 年的目标已成过去——点「改目标」开始新一年的计数吧`;
+  }
+}
+
+$('goalEdit').addEventListener('click', () => {
+  const v = prompt(`新目标：${goal.year} 年认识多少位喵星人？（现在 ${goal.target} 位）`, goal.target);
+  if (v === null) return;
+  const n = Math.round(Number(v));
+  if (!(n >= 1) || n > 9999) return toast('请填一个 1 ~ 9999 的整数');
+  goal = { target: n, year: new Date().getFullYear() };
+  saveGoal();
+  renderStats();
+  renderMosaic(true);
+  toast(`好，${goal.year} 年的目标是 ${n} 位喵星人`);
+});
 
 /* 编辑（防抖保存）
    · 照片行：名字（括号 id 联动 pid）、备注
@@ -1031,6 +1140,7 @@ function renderMosaic(report) {
   let rects = [];
   let note = '';
   let tagText = '';
+  let goalCellRecs = null;   // goal 模式专用：每格要画的照片（null = 空格爪印）
   const cols = Number($('density').value);
   const gridRows = Math.ceil(VH / (VW / cols));
   $('densityVal').textContent = `${cols} × ${gridRows}`;
@@ -1039,6 +1149,17 @@ function renderMosaic(report) {
   if (!n) {
     note = '上传照片后，会按张数自动均分猫头';
     tagText = '等待照片';
+  } else if (layoutMode === 'goal') {
+    const roster = catRoster().filter((c) => c.rep._bitmap);
+    const T = goal.target;
+    const g = goalGridOf(T);
+    rects = mainFirstRects(g.cols, g.rows);
+    goalCellRecs = roster.slice(0, Math.min(roster.length, rects.length)).map((c) => c.rep);
+    const left = Math.max(0, T - roster.length);
+    note = `目标进度：已认识 ${roster.length} / ${T} 位，还差 ${left} 位；空格 = 还没认识的喵星人（用 ${g.cells} 格近似 ${T} 格）`;
+    tagText = roster.length >= T
+      ? `目标达成 🎉 ${roster.length} / ${T} 位喵星人 · ${n} 张照片`
+      : `目标进度 ${roster.length} / ${T} 位喵星人 · ${n} 张照片`;
   } else if (layoutMode === 'grid') {
     rects = mainFirstRects(cols, gridRows);
     const repeat = Math.max(1, Math.round(rects.length / n));
@@ -1084,15 +1205,17 @@ function renderMosaic(report) {
     // 2) 拼贴（裁剪在猫头内）
     ctx.save();
     ctx.clip(catPath2D);
-    const order = shuffleWithSeed(loaded, seed);
+    const order = goalCellRecs ? null : shuffleWithSeed(loaded, seed);
     rects.forEach((rc, i) => {
-      const rec = order[i % order.length];
+      const rec = goalCellRecs ? goalCellRecs[i] : order[i % order.length];
       const x = rc.x + gap / 2;
       const y = rc.y + gap / 2;
       const w = Math.max(1, rc.w - gap);
       const h = Math.max(1, rc.h - gap);
 
-      if (layoutMode === 'auto' && n === 1) {
+      if (goalCellRecs && !rec) {
+        drawEmptySlot(ctx, x, y, w, h);          // 还没认识的位子：淡爪印空格
+      } else if (layoutMode === 'auto' && n === 1) {
         // 单张：完整放入（不裁切），留白处补底色
         drawContain(ctx, rec, x, y, w, h, '#FBF1E4');
       } else {
@@ -1382,6 +1505,26 @@ function pawAt(cx, x, y, s) {
   cx.stroke();
 }
 
+// 目标进度模式里的「还没认识」空格：米色底 + 虚线圆 + 淡爪印
+function drawEmptySlot(cx, x, y, w, h) {
+  cx.fillStyle = '#FBF1E4';
+  cx.fillRect(x, y, w, h);
+  const r = Math.min(w, h) * 0.21;             // 爪印尺寸基准
+  const mx = x + w / 2, my = y + h / 2;
+  cx.save();
+  cx.setLineDash([r * 0.3, r * 0.24]);
+  cx.lineWidth = Math.max(1.2, r * 0.10);
+  cx.strokeStyle = '#D9C0A6';
+  cx.beginPath();
+  cx.arc(mx, my, r * 1.5, 0, Math.PI * 2);
+  cx.stroke();
+  cx.restore();
+  cx.fillStyle = '#E6D2B4';
+  cx.strokeStyle = 'rgba(122,88,58,.16)';
+  cx.lineWidth = Math.max(1, r * 0.06);
+  pawAt(cx, mx, my, r * 1.35);
+}
+
 /* 水印铺法由 wmTile / wmPaw 两个勾选决定（发布面板可改，会记住）：
    - 对角密排：铺满整张图，每个单元 = 小猫爪 + 水印文字。白色半透明 + 极淡深色描边，
      浅底深底都能看见一点；因为密排，透明度压得很低也不会看不见，对拼贴观感的干扰很小。
@@ -1479,6 +1622,7 @@ async function buildSiteFiles(watermark) {
     watermark: wmText,                       // 访客页下载水印用同一个词
     watermarkPaw: wmPaw,                     // 访客页下载水印同步样式（缺省视为 true，兼容旧清单）
     watermarkTile: wmTile,
+    goal: { target: goal.target, year: goal.year },   // 访客页目标进度条用（只是数字，无隐私）
     photos: []
   };
 
@@ -2325,7 +2469,8 @@ $('modeSeg').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-mode]');
   if (!btn) return;
   layoutMode = btn.dataset.mode;
-  Array.from($('modeSeg').children).forEach((b) => b.classList.toggle('on', b === btn));
+  localStorage.setItem('catsmap.layoutMode', layoutMode);
+  syncModeButtons();
   syncMode();
   renderMosaic(true);
 });
@@ -2350,6 +2495,7 @@ $('clearAll').addEventListener('click', async () => {
    ========================================================= */
 (async function init() {
   // 先渲染首帧（空状态），再异步加载数据，避免阻塞
+  syncModeButtons();
   renderList();
   renderMosaic(true);
   syncMode();

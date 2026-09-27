@@ -26,6 +26,14 @@
       <div class="stat"><b id="statCats">0</b><span>个喵星人</span></div>
       <div class="stat"><b id="statClients">0</b><span>位客户</span></div>
       <div class="stat"><b id="statLast">—</b><span>最近探访</span></div>
+      <div class="stat-goal" id="statGoal">
+        <div class="sg-head">
+          <span id="goalTitle">目标进度</span>
+          <span class="sg-right"><em id="goalLeft"></em><button class="mini-btn" id="goalEdit" type="button">改目标</button></span>
+        </div>
+        <div class="sg-bar"><div class="sg-fill" id="goalFill"></div><div class="sg-mark" id="goalMark" title="今天在今年的时间进度位置"></div></div>
+        <p class="sg-note" id="goalNote"></p>
+      </div>
     </div>
     <button class="btn-pub" id="publishBtn" title="把照片和清单写进项目里的 docs/，推上 GitHub Pages 就能看（第一次会请你授权选一次项目文件夹）">
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -102,7 +110,8 @@
       <div class="ctl seg">
         <span>排列方式</span>
         <div class="seg-btns" id="modeSeg">
-          <button type="button" data-mode="auto" class="on">按照片数均分</button>
+          <button type="button" data-mode="auto">按照片数均分</button>
+          <button type="button" data-mode="goal">目标进度</button>
           <button type="button" data-mode="grid">几 × 几 铺满</button>
         </div>
       </div>
@@ -131,7 +140,7 @@
       <button class="btn-soft" id="download">下载这张拼图</button>
     </div>
 
-    <p class="tip" id="tip">提示：默认按张数均分；照片多的时候可以切到「几 × 几 铺满」，做成密集的照片墙。</p>
+    <p class="tip" id="tip">提示：默认「目标进度」模式，空格子代表还没认识的喵星人；也可以切回按张数均分或「几 × 几 铺满」。</p>
   </section>
 
 </main>
