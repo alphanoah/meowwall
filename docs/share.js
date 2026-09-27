@@ -310,6 +310,8 @@ async function loadPhotos() {
   }
   meta = data || {};
   if (meta.watermark) WM_TEXT = String(meta.watermark);
+  WM_PAW = meta.watermarkPaw !== false;
+  WM_TILE = meta.watermarkTile !== false;
   const list = (Array.isArray(meta.photos) ? meta.photos : []).filter((p) => p && p.file);
 
   const total = list.length;
@@ -400,6 +402,8 @@ function pawSvg() {
    水印（与工作台 app.js 里的同名函数保持一致，改一边记得同步另一边）
    ========================================================= */
 let WM_TEXT = 'Theo';   // 会用 photos.json 里的 watermark 字段覆盖（与工作台发布时填的水印文字一致）
+let WM_PAW = true;      // photos.json 里的 watermarkPaw 覆盖（缺省视为 true，兼容旧清单）
+let WM_TILE = true;     // photos.json 里的 watermarkTile 覆盖；false = 右下角一枚
 
 // 一个小猫爪：掌垫 + 四个趾垫（以 (x,y) 为中心，s 为整体宽度）
 function pawAt(cx, x, y, s) {
@@ -414,31 +418,44 @@ function pawAt(cx, x, y, s) {
   cx.stroke();
 }
 
-// 对角密排铺满整张图：每个单元 = 小猫爪 + 「Theo」
+// 水印：铺法由 WM_TILE / WM_PAW 决定（与工作台 app.js 里的同名函数保持一致，改一边记得同步另一边）
 function drawWatermark(cx, w, h) {
-  const span = Math.hypot(w, h);
-  const unit = Math.max(96, Math.round(Math.min(w, h) * 0.40));   // 单元间距
-  const fs = Math.max(11, Math.round(unit * 0.26));               // 文字大小
-  const paw = fs * 1.15;
   cx.save();
-  cx.translate(w / 2, h / 2);
-  cx.rotate(-Math.PI / 5);
-  cx.textAlign = 'center';
-  cx.textBaseline = 'middle';
-  cx.font = `700 ${fs}px system-ui,-apple-system,"PingFang SC",sans-serif`;
   cx.fillStyle = 'rgba(255,255,255,.22)';
   cx.strokeStyle = 'rgba(58,42,32,.13)';
-  cx.lineWidth = Math.max(1, fs * 0.07);
   cx.lineJoin = 'round';
-  let row = 0;
-  for (let y = -span / 2; y <= span / 2; y += unit, row++) {
-    const offset = (row % 2) * (unit / 2);                        // 交错排列更均匀
-    for (let x = -span / 2; x <= span / 2; x += unit) {
-      const px = x + offset;
-      pawAt(cx, px, y - fs * 0.62, paw);
-      cx.strokeText(WM_TEXT, px, y + fs * 0.72);
-      cx.fillText(WM_TEXT, px, y + fs * 0.72);
+  if (WM_TILE) {
+    const span = Math.hypot(w, h);
+    const unit = Math.max(96, Math.round(Math.min(w, h) * 0.40));   // 单元间距
+    const fs = Math.max(11, Math.round(unit * 0.26));               // 文字大小
+    const paw = fs * 1.15;
+    cx.translate(w / 2, h / 2);
+    cx.rotate(-Math.PI / 5);
+    cx.textAlign = 'center';
+    cx.textBaseline = 'middle';
+    cx.font = `700 ${fs}px system-ui,-apple-system,"PingFang SC",sans-serif`;
+    cx.lineWidth = Math.max(1, fs * 0.07);
+    let row = 0;
+    for (let y = -span / 2; y <= span / 2; y += unit, row++) {
+      const offset = (row % 2) * (unit / 2);                        // 交错排列更均匀
+      for (let x = -span / 2; x <= span / 2; x += unit) {
+        const px = x + offset;
+        if (WM_PAW) pawAt(cx, px, y - fs * 0.62, paw);
+        cx.strokeText(WM_TEXT, px, y + fs * 0.72);
+        cx.fillText(WM_TEXT, px, y + fs * 0.72);
+      }
     }
+  } else {
+    const fs = Math.max(16, Math.round(Math.min(w, h) * 0.055));
+    const m = Math.round(fs * 0.9);
+    cx.textAlign = 'right';
+    cx.textBaseline = 'alphabetic';
+    cx.font = `700 ${fs}px system-ui,-apple-system,"PingFang SC",sans-serif`;
+    cx.lineWidth = Math.max(1, fs * 0.06);
+    const tx = w - m, ty = h - m;
+    if (WM_PAW) pawAt(cx, tx - cx.measureText(WM_TEXT).width - fs * 0.85, ty - fs * 0.32, fs * 1.15);
+    cx.strokeText(WM_TEXT, tx, ty);
+    cx.fillText(WM_TEXT, tx, ty);
   }
   cx.restore();
 }

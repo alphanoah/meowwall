@@ -1251,7 +1251,7 @@ function uniqueName(base, ext, used) {
 }
 
 // —— 按裁剪参数渲染成品 JPEG（未裁剪的 = 原图完整导出，最长边不超存库尺寸）
-//    watermark = true 时叠一层「Theo + 猫爪」对角密排水印（只用于发布，不影响库里的原图）
+//    watermark = true 时叠一层水印（样式见 wmPaw/wmTile 勾选，只用于发布，不影响库里的原图）
 function renderExportBlob(rec, watermark) {
   const img = sourceOf(rec);
   if (!img) return Promise.resolve(null);
@@ -1355,6 +1355,8 @@ async function exportZip() {
 
 const WM_DEFAULT = 'Theo';
 let wmText = localStorage.getItem('catsmap.wmText') || WM_DEFAULT;   // 水印文字（发布面板可改，会记住）
+let wmPaw = localStorage.getItem('catsmap.wmPaw') !== '0';           // 水印带小猫爪（会记住）
+let wmTile = localStorage.getItem('catsmap.wmTile') !== '0';         // 对角密排；关掉 = 右下角一枚（会记住）
 const SITE_DIR = 'docs';                     // GitHub Pages 从这里发布
 const SITE_PHOTO_DIR = 'meowtonians';        // 站点内的照片目录
 const PUB_DIR_KEY = 'publishDir';            // 「上次选的项目文件夹」句柄的键
@@ -1372,33 +1374,47 @@ function pawAt(cx, x, y, s) {
   cx.stroke();
 }
 
-/* 对角密排铺满整张图：每个单元 = 小猫爪 + 水印文字。
-   白色半透明 + 极淡深色描边，浅底深底都能看见一点；因为密排，
-   透明度压得很低也不会看不见，同时对拼贴观感的干扰很小。 */
+/* 水印铺法由 wmTile / wmPaw 两个勾选决定（发布面板可改，会记住）：
+   - 对角密排：铺满整张图，每个单元 = 小猫爪 + 水印文字。白色半透明 + 极淡深色描边，
+     浅底深底都能看见一点；因为密排，透明度压得很低也不会看不见，对拼贴观感的干扰很小。
+   - 右下角一枚：字号放大、水平摆放，干扰最小但不防裁掉角落。 */
 function drawWatermark(cx, w, h) {
-  const span = Math.hypot(w, h);
-  const unit = Math.max(96, Math.round(Math.min(w, h) * 0.40));   // 单元间距
-  const fs = Math.max(11, Math.round(unit * 0.26));               // 文字大小
-  const paw = fs * 1.15;
   cx.save();
-  cx.translate(w / 2, h / 2);
-  cx.rotate(-Math.PI / 5);
-  cx.textAlign = 'center';
-  cx.textBaseline = 'middle';
-  cx.font = `700 ${fs}px system-ui,-apple-system,"PingFang SC",sans-serif`;
   cx.fillStyle = 'rgba(255,255,255,.22)';
   cx.strokeStyle = 'rgba(58,42,32,.13)';
-  cx.lineWidth = Math.max(1, fs * 0.07);
   cx.lineJoin = 'round';
-  let row = 0;
-  for (let y = -span / 2; y <= span / 2; y += unit, row++) {
-    const offset = (row % 2) * (unit / 2);                        // 交错排列更均匀
-    for (let x = -span / 2; x <= span / 2; x += unit) {
-      const px = x + offset;
-      pawAt(cx, px, y - fs * 0.62, paw);
-      cx.strokeText(wmText, px, y + fs * 0.72);
-      cx.fillText(wmText, px, y + fs * 0.72);
+  if (wmTile) {
+    const span = Math.hypot(w, h);
+    const unit = Math.max(96, Math.round(Math.min(w, h) * 0.40));   // 单元间距
+    const fs = Math.max(11, Math.round(unit * 0.26));               // 文字大小
+    const paw = fs * 1.15;
+    cx.translate(w / 2, h / 2);
+    cx.rotate(-Math.PI / 5);
+    cx.textAlign = 'center';
+    cx.textBaseline = 'middle';
+    cx.font = `700 ${fs}px system-ui,-apple-system,"PingFang SC",sans-serif`;
+    cx.lineWidth = Math.max(1, fs * 0.07);
+    let row = 0;
+    for (let y = -span / 2; y <= span / 2; y += unit, row++) {
+      const offset = (row % 2) * (unit / 2);                        // 交错排列更均匀
+      for (let x = -span / 2; x <= span / 2; x += unit) {
+        const px = x + offset;
+        if (wmPaw) pawAt(cx, px, y - fs * 0.62, paw);
+        cx.strokeText(wmText, px, y + fs * 0.72);
+        cx.fillText(wmText, px, y + fs * 0.72);
+      }
     }
+  } else {
+    const fs = Math.max(16, Math.round(Math.min(w, h) * 0.055));    // 单枚模式字号放大
+    const m = Math.round(fs * 0.9);                                 // 右下角留边
+    cx.textAlign = 'right';
+    cx.textBaseline = 'alphabetic';
+    cx.font = `700 ${fs}px system-ui,-apple-system,"PingFang SC",sans-serif`;
+    cx.lineWidth = Math.max(1, fs * 0.06);
+    const tx = w - m, ty = h - m;
+    if (wmPaw) pawAt(cx, tx - cx.measureText(wmText).width - fs * 0.85, ty - fs * 0.32, fs * 1.15);
+    cx.strokeText(wmText, tx, ty);
+    cx.fillText(wmText, tx, ty);
   }
   cx.restore();
 }
@@ -1453,6 +1469,8 @@ async function buildSiteFiles(watermark) {
     count: 0, cats: 0,
     mosaic: `${SITE_PHOTO_DIR}/拼贴-大猫头.png`,
     watermark: wmText,                       // 访客页下载水印用同一个词
+    watermarkPaw: wmPaw,                     // 访客页下载水印同步样式（缺省视为 true，兼容旧清单）
+    watermarkTile: wmTile,
     photos: []
   };
 
@@ -1648,6 +1666,8 @@ function openPublishModal() {
   $('pubCount').textContent = `${n} 张照片`;
   $('pubCatCount').textContent = `${siteCatCount()} 个喵星人`;
   $('wmTextInput').value = wmText === WM_DEFAULT ? '' : wmText;
+  $('wmPawInput').checked = wmPaw;
+  $('wmTileInput').checked = wmTile;
   drawWmPreview();
   refreshPubDirHint();
   $('publishModal').classList.add('show');
@@ -1690,12 +1710,26 @@ $('publishModal').addEventListener('click', (e) => { if (e.target === $('publish
 $('pubWatermark').addEventListener('change', () => {
   $('wmPreview').style.opacity = $('pubWatermark').checked ? '1' : '.28';
 });
+// 水印说明文字：跟着文字/小猫爪/铺法三个偏好走
+function wmLabelTxt() {
+  return `${wmText}${wmPaw ? ' + 小猫爪' : ''}，${wmTile ? '对角密排' : '右下角一枚'}`;
+}
+// 小猫爪 / 对角密排勾选：即点即生效（预览刷新 + 记住偏好）
+function bindWmOpt(inputId, set) {
+  $(inputId).addEventListener('change', () => {
+    set($(inputId).checked);
+    $('wmLabel').textContent = wmLabelTxt();
+    drawWmPreview();
+  });
+}
+bindWmOpt('wmPawInput', (v) => { wmPaw = v; localStorage.setItem('catsmap.wmPaw', v ? '1' : '0'); });
+bindWmOpt('wmTileInput', (v) => { wmTile = v; localStorage.setItem('catsmap.wmTile', v ? '1' : '0'); });
 // 水印文字：输入即生效（预览刷新 + 记住偏好），留空恢复默认 Theo
 $('wmTextInput').addEventListener('input', () => {
   const v = $('wmTextInput').value.trim();
   wmText = v || WM_DEFAULT;
   localStorage.setItem('catsmap.wmText', wmText);
-  $('wmLabel').textContent = `${wmText} + 小猫爪，对角密排`;
+  $('wmLabel').textContent = wmLabelTxt();
   drawWmPreview();
 });
 $('pubDirChange').addEventListener('click', async () => {
