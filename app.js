@@ -1142,7 +1142,7 @@ function renderMosaic() {
   let tagText = '';
   let goalCellRecs = null;   // goal 模式专用：每格要画的照片（null = 空格爪印）
   const cols = Number($('density').value);
-  const gridRows = Math.ceil(VH / (VW / cols));
+  const gridRows = gridRowsOf(cols);
   $('densityVal').textContent = `${cols} × ${gridRows}`;
   $('gapVal').textContent = gap;
 
@@ -1376,6 +1376,26 @@ function uniqueName(base, ext, used) {
 // —— 导出/发布用的成品 JPEG：按裁剪参数渲染（画法见 renderCropBlob），可叠水印
 const renderExportBlob = (rec, watermark) => renderCropBlob(rec, MAX_SIZE, 0.9, watermark);
 
+/* 逐张把照片渲染成成品 JPEG（按裁剪参数，可带水印）并生成不重名的文件名，
+   每张交给 onItem(文件名, 字节, 记录) 由调用方放进自己的包/清单；
+   每 5 张报一次进度。verb 用于进度与失败提示。返回成功张数。 */
+async function renderEachPhoto(src, watermark, verb, used, onItem) {
+  let done = 0, ok = 0;
+  for (const rec of src) {
+    try {
+      const blob = await renderExportBlob(rec, watermark);
+      if (blob) {
+        const fname = uniqueName(photoFileBase(rec), 'jpg', used);
+        await onItem(fname, await blobBytes(blob), rec);
+        ok++;
+      }
+    } catch (e) { console.warn(`一张照片${verb}失败，已跳过`, e); }
+    done++;
+    if (done % 5 === 0) toast(`正在${verb}… ${done} / ${src.length}`);
+  }
+  return ok;
+}
+
 // 拼贴大猫头成品（示例模式下临时用真实照片重画，画完恢复现场）
 async function mosaicPngBlob() {
   if (!demoActive) {
@@ -1402,28 +1422,20 @@ async function exportZip() {
   const manifest = { app: 'catsmap', type: 'photo-pack', version: 1, exportedAt: new Date().toISOString(), photos: [] };
 
   // 1) 每张照片的成品图
-  let done = 0;
-  for (const rec of src) {
-    try {
-      const blob = await renderExportBlob(rec);
-      if (!blob) continue;
-      const fname = uniqueName(photoFileBase(rec), 'jpg', used);
-      files.push({ name: fname, data: await blobBytes(blob) });
-      manifest.photos.push({
-        file: fname,
-        name: (rec.name || '').trim(),
-        id: pidOf(rec),
-        date: rec.date || '',
-        place: rec.place || '',
-        note: rec.note || '',
-        cropped: !!isCropped(rec)
-      });
-    } catch (e) { console.warn('一张照片导出失败，已跳过', e); }
-    done++;
-    if (done % 5 === 0) toast(`正在打包… ${done} / ${src.length}`);
-  }
+  const ok = await renderEachPhoto(src, false, '打包', used, (fname, data, rec) => {
+    files.push({ name: fname, data });
+    manifest.photos.push({
+      file: fname,
+      name: (rec.name || '').trim(),
+      id: pidOf(rec),
+      date: rec.date || '',
+      place: rec.place || '',
+      note: rec.note || '',
+      cropped: !!isCropped(rec)
+    });
+  });
 
-  if (!files.length) return toast('照片导出失败，请重试');
+  if (!ok) return toast('照片导出失败，请重试');
 
   // 2) 拼贴大猫头
   try {
@@ -1601,19 +1613,11 @@ async function buildSiteFiles(watermark) {
     photos: []
   };
 
-  let done = 0;
-  for (const rec of src) {
-    try {
-      const blob = await renderExportBlob(rec, watermark);
-      if (!blob) continue;
-      const fname = uniqueName(photoFileBase(rec), 'jpg', used);
-      files.push({ path: `${SITE_PHOTO_DIR}/${fname}`, data: await blobBytes(blob) });
-      // 隐私：清单只带文件名和喵星人名，不带地址/日期/备注/编号
-      manifest.photos.push({ file: `${SITE_PHOTO_DIR}/${fname}`, name: (rec.name || '').trim() });
-    } catch (e) { console.warn('一张照片发布失败，已跳过', e); }
-    done++;
-    if (done % 5 === 0) toast(`正在渲染… ${done} / ${src.length}`);
-  }
+  await renderEachPhoto(src, watermark, '渲染', used, (fname, data, rec) => {
+    files.push({ path: `${SITE_PHOTO_DIR}/${fname}`, data });
+    // 隐私：清单只带文件名和喵星人名，不带地址/日期/备注/编号
+    manifest.photos.push({ file: `${SITE_PHOTO_DIR}/${fname}`, name: (rec.name || '').trim() });
+  });
   if (!files.length) return null;
 
   try {
@@ -2015,15 +2019,11 @@ function zipFind(entries, want) {
   return byName;
 }
 
+/* 新版 ZIP 备份导入：photos/*.jpg 原图 + manifest.json 元数据（缩略图重新生成） */
 async function importBackup(file) {
   if (!file) return;
   const isZip = /\.zip$/i.test(file.name) || String(file.type || '').includes('zip');
   if (!isZip) return toast('备份是「导出备份」生成的 zip 包，请选择 .zip 文件');
-  return importBackupZip(file);
-}
-
-/* 新版 ZIP 备份导入：photos/*.jpg 原图 + manifest.json 元数据（缩略图重新生成） */
-async function importBackupZip(file) {
   let entries;
   try { entries = await zipRead(new Uint8Array(await file.arrayBuffer())); }
   catch (e) { return toast('这个包读不了（' + e.message + '）'); }
