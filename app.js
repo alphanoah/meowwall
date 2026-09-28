@@ -1602,7 +1602,7 @@ function siteCatCount() {
     if (isGroupName(name)) continue;
     keys.add(pidOf(p) + '|' + name);
   }
-  return keys.size + (keys.size ? 0 : (unnamed ? 1 : 0));
+  return keys.size + (unnamed ? 1 : 0);
 }
 
 // 渲染出待发布的全部文件。path 相对 docs/（如 meowtonians/1-咪咪.jpg、photos.json），
