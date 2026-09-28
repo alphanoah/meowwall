@@ -269,12 +269,15 @@ const pxH = (img) => img.height || img.naturalHeight || 0;
 
 function cropOf(rec) { return rec.crop || FULL_CROP; }
 
-function isCropped(rec) {
-  const c = rec.crop;
-  if (!c) return false;
-  if (c.rot) return true;
-  return c.x > 0.002 || c.y > 0.002 || c.w < 0.998 || c.h < 0.998;
+/* 这组裁剪参数是否等于「原图整张」（未旋转、未裁切）。
+   阈值 0.002/0.998：落在这个范围内的偏差肉眼不可见，一律视为没裁，
+   库里不存无用参数。isCropped / openCropModal / applyCrop 三处共用。 */
+function isFullCrop(c) {
+  if (!c) return true;
+  return !c.rot && c.x <= 0.002 && c.y <= 0.002 && c.w >= 0.998 && c.h >= 0.998;
 }
+
+const isCropped = (rec) => !isFullCrop(rec.crop);
 
 // 把原图旋转后的画布（缓存，最长边不超过存库尺寸，避免大图占内存）
 function rotatedCanvas(rec, rot) {
@@ -306,8 +309,10 @@ function prepareSrc(rec) {
   rec._rotSrc = (rot && rec._bitmap) ? rotatedCanvas(rec, rot) : null;
 }
 
-// 按当前裁剪参数，把「保留区域」等比放进 w×h（cover：铺满并居中裁切多余部分）
-function drawCover(cx, rec, x, y, w, h) {
+/* 把「保留区域」按当前裁剪参数画进 w×h 格子。mode：
+   · 'cover'   铺满并居中裁掉多余部分（拼贴格子用）
+   · 'contain' 完整放入不裁切，留白补 bg 底色（单张照片时用） */
+function drawFit(cx, rec, x, y, w, h, mode, bg) {
   const img = sourceOf(rec);
   if (!img) return;
   const iw = pxW(img), ih = pxH(img);
@@ -315,45 +320,37 @@ function drawCover(cx, rec, x, y, w, h) {
   const c = cropOf(rec);
   const sw = Math.max(1, iw * c.w), sh = Math.max(1, ih * c.h);
   const sx = iw * c.x, sy = ih * c.y;
-  const k = Math.max(w / sw, h / sh);
+  const k = (mode === 'contain' ? Math.min : Math.max)(w / sw, h / sh);
   const dw = sw * k, dh = sh * k;
+  if (mode === 'contain') { cx.fillStyle = bg; cx.fillRect(x, y, w, h); }
   cx.drawImage(img, sx, sy, sw, sh, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
 }
 
-// 同样按裁剪参数，但「完整放入」不裁切，留白补底色（单张照片时用）
-function drawContain(cx, rec, x, y, w, h, bg) {
-  const img = sourceOf(rec);
-  if (!img) return;
-  const iw = pxW(img), ih = pxH(img);
-  if (!iw || !ih) return;
-  const c = cropOf(rec);
-  const sw = Math.max(1, iw * c.w), sh = Math.max(1, ih * c.h);
-  const sx = iw * c.x, sy = ih * c.y;
-  const k = Math.min(w / sw, h / sh);
-  const dw = sw * k, dh = sh * k;
-  cx.fillStyle = bg;
-  cx.fillRect(x, y, w, h);
-  cx.drawImage(img, sx, sy, sw, sh, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
-}
-
-// 按裁剪结果重做缩略图（保持裁剪后的比例，最长边 THUMB_SIZE）
-function croppedThumb(rec) {
+/* 按裁剪结果渲染成 JPEG blob（缩略图与导出/发布共用同一套画法）。
+   maxSide = 成品最长边上限；quality = JPEG 质量；watermark = 叠水印（只用于发布，
+   不影响库里的原图）。未裁剪的 = 原图完整渲染。 */
+function renderCropBlob(rec, maxSide, quality, watermark) {
   const img = sourceOf(rec);
   if (!img) return Promise.resolve(null);
   const iw = pxW(img), ih = pxH(img);
+  if (!iw || !ih) return Promise.resolve(null);
   const c = cropOf(rec);
   const sw = Math.max(1, iw * c.w), sh = Math.max(1, ih * c.h);
   const sx = iw * c.x, sy = ih * c.y;
-  const k = Math.min(1, THUMB_SIZE / Math.max(sw, sh));
-  const dw = Math.max(1, Math.round(sw * k)), dh = Math.max(1, Math.round(sh * k));
+  const k = Math.min(1, maxSide / Math.max(sw, sh));
+  const w = Math.max(1, Math.round(sw * k)), h = Math.max(1, Math.round(sh * k));
   const cv = document.createElement('canvas');
-  cv.width = dw; cv.height = dh;
+  cv.width = w; cv.height = h;
   const x = cv.getContext('2d');
   x.fillStyle = '#fff';
-  x.fillRect(0, 0, dw, dh);
-  x.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
-  return new Promise((resolve) => cv.toBlob((b) => resolve(b), 'image/jpeg', 0.78));
+  x.fillRect(0, 0, w, h);
+  x.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
+  if (watermark) drawWatermark(x, w, h);
+  return new Promise((resolve) => cv.toBlob((b) => resolve(b), 'image/jpeg', quality));
 }
+
+// 缩略图：保持裁剪后的比例，最长边 THUMB_SIZE
+const croppedThumb = (rec) => renderCropBlob(rec, THUMB_SIZE, 0.78);
 
 /* =========================================================
    文件名解析：客户id-喵星人名称-地址（地址可省略）
@@ -1220,9 +1217,9 @@ function renderMosaic() {
         drawEmptySlot(ctx, x, y, w, h);          // 还没认识的位子：淡爪印空格
       } else if (layoutMode === 'auto' && n === 1) {
         // 单张：完整放入（不裁切），留白处补底色
-        drawContain(ctx, rec, x, y, w, h, '#FBF1E4');
+        drawFit(ctx, rec, x, y, w, h, 'contain', '#FBF1E4');
       } else {
-        drawCover(ctx, rec, x, y, w, h);
+        drawFit(ctx, rec, x, y, w, h, 'cover');
       }
     });
     // 轻微高光，让层次更柔和
@@ -1376,27 +1373,8 @@ function uniqueName(base, ext, used) {
   return `${n}.${ext}`;
 }
 
-// —— 按裁剪参数渲染成品 JPEG（未裁剪的 = 原图完整导出，最长边不超存库尺寸）
-//    watermark = true 时叠一层水印（样式见 wmPaw/wmTile 勾选，只用于发布，不影响库里的原图）
-function renderExportBlob(rec, watermark) {
-  const img = sourceOf(rec);
-  if (!img) return Promise.resolve(null);
-  const iw = pxW(img), ih = pxH(img);
-  if (!iw || !ih) return Promise.resolve(null);
-  const c = cropOf(rec);
-  const sw = Math.max(1, iw * c.w), sh = Math.max(1, ih * c.h);
-  const sx = iw * c.x, sy = ih * c.y;
-  const k = Math.min(1, MAX_SIZE / Math.max(sw, sh));
-  const w = Math.max(1, Math.round(sw * k)), h = Math.max(1, Math.round(sh * k));
-  const cv = document.createElement('canvas');
-  cv.width = w; cv.height = h;
-  const x = cv.getContext('2d');
-  x.fillStyle = '#fff';
-  x.fillRect(0, 0, w, h);
-  x.drawImage(img, sx, sy, sw, sh, 0, 0, w, h);
-  if (watermark) drawWatermark(x, w, h);
-  return new Promise((r) => cv.toBlob((b) => r(b), 'image/jpeg', 0.9));
-}
+// —— 导出/发布用的成品 JPEG：按裁剪参数渲染（画法见 renderCropBlob），可叠水印
+const renderExportBlob = (rec, watermark) => renderCropBlob(rec, MAX_SIZE, 0.9, watermark);
 
 // 拼贴大猫头成品（示例模式下临时用真实照片重画，画完恢复现场）
 async function mosaicPngBlob() {
@@ -2137,8 +2115,7 @@ function openCropModal(rec, inQueue) {
   buildCropStage();
 
   const c = rec.crop;
-  const isFull = !c || (c.x === 0 && c.y === 0 && c.w === 1 && c.h === 1);
-  if (c && (c.rot || 0) === cropRot && !isFull) {
+  if (c && !isFullCrop(c)) {          // 已裁剪过的照片：把框恢复到它上次的位置
     cropBoxPx = { l: c.x * cropDispW, t: c.y * cropDispH, w: c.w * cropDispW, h: c.h * cropDispH };
     clampBox();
     // 已经是裁剪过的照片：反推它像哪个预设比例，像就选中，否则显示「自由」
@@ -2335,8 +2312,7 @@ async function applyCrop() {
     w: cropBoxPx.w / cropDispW,
     h: cropBoxPx.h / cropDispH
   };
-  const full = !norm.rot && norm.x < 0.002 && norm.y < 0.002 && norm.w > 0.998 && norm.h > 0.998;
-  const next = full ? null : norm;
+  const next = isFullCrop(norm) ? null : norm;
   const cur = rec.crop || null;
   const same = (!cur && !next) || (cur && next &&
     cur.rot === next.rot && Math.abs(cur.x - next.x) < 0.001 && Math.abs(cur.y - next.y) < 0.001 &&
