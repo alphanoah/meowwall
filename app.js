@@ -657,31 +657,49 @@ function escapeAttr(s) {
     .replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/* 统计口径（编号一律看 pid 字段，名字里不再带编号）：
-   · 照片   = 总张数
-   · 喵星人 = 同一户内的名字去重（不同户的同名喵星人各算一个）；合照不算喵星人；
-              完全没填名字的照片整体算作 1 个「未命名喵星人」
-   · 客户   = pid 去重（一户一位）；没有编号的照片单独计：
-              每张未命名照片算一位，有名字但没编号的合起来算一位
-   改了名字或编号后，这里会跟着重新统计。 */
+/* 「喵星人 / 客户」统计口径的唯一定义（工作台统计卡、目标进度花名册、发布文案三处共用，
+   以后改口径只改这里）：
+   · 喵星人键 = 户编号(pid) + 名字：同一户内去重，不同户的同名各算一个；
+     没有编号的照片按名字单独成组（键加 # 前缀区分）
+   · 合照（名字以「合照」开头）不算喵星人
+   · 完全没填名字的照片整体算 1 位「未命名喵星人」，代表照取最新一张
+   · 客户 = pid 去重（一户一位）；没有编号的照片单独计：
+     每张未命名照片算一位，有名字但没编号的合起来算一位
+   返回：
+     named      Map(key -> { key, name, pid, rep })，rep = 该喵星人最新一张照片
+     unnamed    未命名照片张数
+     unnamedRep 未命名喵星人的代表照（null = 没有）
+     clients    Set(pid)  有编号的客户
+     namedNoId  有名字但没编号的照片张数 */
+const tsOf = (p) => (p.date ? (Date.parse(p.date) || 0) : (p.createdAt || 0));
+
+function censusOf(src) {
+  const named = new Map();
+  const clients = new Set();
+  let unnamed = 0, unnamedRep = null, namedNoId = 0;
+  for (const p of src) {
+    const name = (p.name || '').trim();
+    if (!name) {                                   // 未命名：整体算 1 位，代表照取最新
+      unnamed++;
+      if (!unnamedRep || tsOf(p) > tsOf(unnamedRep)) unnamedRep = p;
+      continue;
+    }
+    const pid = pidOf(p);
+    if (pid) clients.add(pid); else namedNoId++;
+    if (isGroupName(name)) continue;               // 合照不算喵星人
+    const key = (pid || '#') + '|' + name;
+    const cur = named.get(key);
+    if (!cur || tsOf(p) > tsOf(cur.rep)) named.set(key, { key, name, pid, rep: p });
+  }
+  return { named, unnamed, unnamedRep, clients, namedNoId };
+}
+
 function renderStats() {
   $('statPhotos').textContent = photos.length;
 
-  const catKeys = new Set();   // 喵星人去重键 = 户编号 + 名字（避免不同客户同名混在一起）
-  const clientIds = new Set(); // 有编号的客户（pid 去重）
-  let unnamed = 0;             // 完全没填名字的照片
-  let namedNoId = 0;           // 有名字但没有编号的照片
-
-  photos.forEach((p) => {
-    const name = (p.name || '').trim();
-    const pid = String(p.pid ?? '').trim() || idOf(name);   // 旧内存数据兜底
-    if (!name) { unnamed++; return; }
-    if (pid) clientIds.add(pid); else namedNoId++;
-    if (!isGroupName(name)) catKeys.add((pid || '#') + '|' + name);
-  });
-
-  $('statCats').textContent = catKeys.size + (unnamed ? 1 : 0);
-  $('statClients').textContent = clientIds.size + unnamed + (namedNoId ? 1 : 0);
+  const c = censusOf(photos);
+  $('statCats').textContent = c.named.size + (c.unnamed ? 1 : 0);
+  $('statClients').textContent = c.clients.size + c.unnamed + (c.namedNoId ? 1 : 0);
 
   const dates = photos.map((p) => p.date).filter(Boolean).sort();
   $('statLast').textContent = dates.length ? dates[dates.length - 1].slice(5).replace('-', '/') : '—';
@@ -707,27 +725,12 @@ function saveGoal() {
   localStorage.setItem('catsmap.goal', JSON.stringify(goal));
 }
 
-// 喵星人花名册：按「户编号|名字」去重，每只猫的代表照取最新一张；
-// 未命名照片整体算 1 位「未命名喵星人」（代表照取最新一张）；合照不算。
+// 喵星人花名册：按「户编号|名字」去重（口径见 censusOf），每只猫的代表照取最新一张；
 // 返回按代表照时间升序（最早认识的排前面）。
 function catRoster() {
-  const map = new Map();
-  let unnamedRep = null;
-  const tsOf = (p) => (p.date ? (Date.parse(p.date) || 0) : (p.createdAt || 0));
-  photos.forEach((p) => {
-    const name = (p.name || '').trim();
-    if (!name) {
-      if (!unnamedRep || tsOf(p) > tsOf(unnamedRep)) unnamedRep = p;
-      return;
-    }
-    if (isGroupName(name)) return;                     // 合照不算喵星人
-    const pid = String(p.pid ?? '').trim() || idOf(name);
-    const key = (pid || '#') + '|' + name;
-    const cur = map.get(key);
-    if (!cur || tsOf(p) > tsOf(cur.rep)) map.set(key, { key, name, pid, rep: p });
-  });
-  const list = [...map.values()];
-  if (unnamedRep) list.push({ key: '#|__unnamed__', name: '未命名喵星人', pid: '', rep: unnamedRep, unnamed: true });
+  const c = censusOf(photos);
+  const list = [...c.named.values()];
+  if (c.unnamedRep) list.push({ key: '#|__unnamed__', name: '未命名喵星人', pid: '', rep: c.unnamedRep, unnamed: true });
   list.sort((a, b) => tsOf(a.rep) - tsOf(b.rep));
   return list;
 }
@@ -1591,18 +1594,12 @@ async function watermarkBlob(blob, clipCat) {
   return await new Promise((r) => c.toBlob((b) => r(b), 'image/png'));
 }
 
-// 站点文案里的「N 个喵星人」：同一户内名字去重、合照不算（和工作台统计口径一致）
+// 站点文案里的「N 个喵星人」：口径与工作台一致（censusOf），
+// 但只数真实照片——示例照片不入库、也不会发布，不进清单
 function siteCatCount() {
   const src = (demoActive ? (demoSnapshot || []) : photos).filter((p) => !p.demo && p._bitmap);
-  const keys = new Set();
-  let unnamed = 0;
-  for (const p of src) {
-    const name = (p.name || '').trim();
-    if (!name) { unnamed++; continue; }
-    if (isGroupName(name)) continue;
-    keys.add(pidOf(p) + '|' + name);
-  }
-  return keys.size + (unnamed ? 1 : 0);
+  const c = censusOf(src);
+  return c.named.size + (c.unnamed ? 1 : 0);
 }
 
 // 渲染出待发布的全部文件。path 相对 docs/（如 meowtonians/1-咪咪.jpg、photos.json），
