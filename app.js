@@ -218,6 +218,15 @@ async function kvPut(key, val) {
     tx.onerror = () => reject(tx.error);
   });
 }
+async function kvDelete(key) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(KV_STORE, 'readwrite');
+    tx.objectStore(KV_STORE).delete(key);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
 
 /* =========================================================
    图片解码 / 压缩
@@ -1652,6 +1661,35 @@ async function readPubDir() {
 async function savePubDir(handle) {
   try { await kvPut(PUB_DIR_KEY, handle); } catch (e) { console.warn('记不住文件夹，下次要重选', e); }
 }
+// 忘掉记着的文件夹：句柄失效后留着它，每次发布都白试一遍、还得等一次失败
+async function forgetPubDir() {
+  try { await kvDelete(PUB_DIR_KEY); } catch (e) { /* 删不掉也不要紧，下次探测同样会发现它不可用 */ }
+}
+
+/* 目录句柄「还活着吗」的探测。
+   句柄能整存进 IndexedDB，但文件夹被移动/改名/磁盘拔掉之后它照样读得出来，
+   而且权限查询（queryPermission）依旧返回 granted，看不出任何异常——只有在真正读写
+   的那一刻才抛 NotFoundError："A requested file or directory could not be found at the
+   time an operation was processed."（工作台上那句「写不进文件夹」就是这么来的）
+   所以这里主动试读一下目录：只读，不创建任何东西。 */
+async function dirUsable(h) {
+  if (!h || typeof h.values !== 'function') return true;   // 探测不了就交给真正写入去报错
+  try { await h.values().next(); return true; } catch (e) { return false; }
+}
+
+// 写文件失败时给一句人话（最常见的就是上面那种「文件夹被移动/改名」）
+function writeFailText(e) {
+  const n = (e && e.name) || '';
+  if (n === 'NotFoundError') return '上次选的项目文件夹找不到了（可能被移动或改名）';
+  if (n === 'NotAllowedError') return '没有这个文件夹的写入权限';
+  if (n === 'QuotaExceededError') return '磁盘空间不够了';
+  return `写文件出错（${(e && e.message) || n || '未知原因'}）`;
+}
+// 这个错误是否说明「记着的句柄不可信了」——是的话就该忘掉它，下次重选
+function staleDirErr(e) {
+  const n = (e && e.name) || '';
+  return n === 'NotFoundError' || n === 'NotAllowedError';
+}
 
 // 申请读写权限。request=true 才允许弹授权框（必须在用户点击里调用）
 async function askPermission(handle, request) {
@@ -1694,8 +1732,14 @@ async function pickPubDir() {
 }
 async function currentPubDir(request) {
   const saved = await readPubDir();
-  if (saved && (await askPermission(saved, request)) === 'granted') return saved;
-  if (saved && !request) return null;      // 需要授权但这次不能弹框 → 交给外层去弹
+  if (saved) {
+    // 先探活：文件夹被移动/改名过的话句柄已是死的，直接拿来用只会在最后写文件时才报错
+    //（用户看到的就是那句「写不进文件夹 … could not be found」，然后被迫收下一个 zip）
+    const alive = await dirUsable(saved);
+    if (alive && (await askPermission(saved, request)) === 'granted') return saved;
+    if (!alive) await forgetPubDir();   // 死句柄清掉，下面重选时记新的；活着的只是缺授权就别动它
+    if (!request) return null;          // 需要重新授权但这次不能弹框 → 交给外层去弹
+  }
   return await pickPubDir();
 }
 
@@ -1765,8 +1809,13 @@ async function publishSite(watermark) {
     return;
   } catch (e) {
     console.warn('写入文件夹失败，改成下载 zip', e);
+    const dropDir = staleDirErr(e);     // 句柄失效/没权限 → 忘掉它，下次重选；临时故障（磁盘满等）→ 留着
+    if (dropDir) await forgetPubDir();
     downloadSiteZip(built.files);
-    toast(`写不进文件夹（${e.message || e.name}），已改成下载发布包`);
+    const next = dropDir
+      ? '下次点发布会让你重新选一次项目文件夹（选当前的项目目录即可）'
+      : '再发布一次时，在面板里点「换个文件夹」重新授权就好';
+    toast(`${writeFailText(e)}，已改成下载发布包。${next}`, { ms: 9000 });
   }
 }
 
@@ -1822,7 +1871,15 @@ async function refreshPubDirHint() {
     return;
   }
   const h = await readPubDir();
-  if (h) {
+  if (h && !(await dirUsable(h))) {
+    // 记着的文件夹已经不在了（被移动/改名过）。这里必须说实话：不然面板上写着「不会弹框」，
+    // 发布时却又弹一次，或者干脆写失败降级成下载 zip
+    txt.innerHTML = '<b>上次记下的项目文件夹已经找不到了</b>（多半是被移动或改名了）。'
+      + '发布时会先让你重新选一次<b>项目文件夹</b>（就是有 index.html 的那个），选完照旧直接写进 <code>docs/</code>，以后不用再选。';
+    btn.hidden = true;
+    go.textContent = '重新选文件夹并发布';
+    go.title = '上次选的文件夹已失效，需要重选一次';
+  } else if (h) {
     txt.innerHTML = `发布直接写进 <b>${escapeAttr(h.name)}</b> 里的 <code>docs/</code>，不用解压，也不会再弹框。`;
     btn.hidden = false;
     go.textContent = '开始发布';
