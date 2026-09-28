@@ -414,6 +414,7 @@ async function addFiles(fileList) {
   toast(`正在处理 ${files.length} 张照片…`);
   let ok = 0;
   let auto = 0;
+  let done = 0;
   const added = [];
   for (const f of files) {
     try {
@@ -423,16 +424,18 @@ async function addFiles(fileList) {
       await saveRecord(rec);
       added.push(rec);
       ok++;
-      renderList();
-      renderMosaic();
     } catch (e) {
       console.warn('照片处理失败', e);
     }
+    done++;
+    // 进度用提示条反馈；列表和拼贴是全量重绘，每张都画一遍的话
+    // 传 20 张就要重绘 20 多次，统一放到循环结束画一次
+    if (files.length > 3) toast(`正在处理… ${done} / ${files.length}`);
   }
   if (!ok) return toast('这些照片没能读取成功');
-  toast(auto ? `已加入 ${ok} 张照片，其中 ${auto} 张按文件名自动填好了名字` : `已加入 ${ok} 张照片`);
-  renderStats();
+  renderList();          // 末尾会一并更新统计与目标进度
   renderMosaic();
+  toast(auto ? `已加入 ${ok} 张照片，其中 ${auto} 张按文件名自动填好了名字` : `已加入 ${ok} 张照片`);
   openCropQueue(added);   // 上传后紧接着逐张裁剪（可一键全部保持原样）
 }
 
@@ -2074,7 +2077,6 @@ async function importBackup(file) {
   }
   renderList();
   renderMosaic();
-  renderStats();
   toast(ok ? `已恢复 ${ok} 张照片` : '导入失败，请检查备份文件');
 }
 
