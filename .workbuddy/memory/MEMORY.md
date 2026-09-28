@@ -5,7 +5,7 @@
 - 仓库：`/Users/alpha/Theo/meowwall`（2026-09-28 从 `/Users/alpha/Downloads/catsmap` 整体移动过来，GitHub 远端与提交历史不变），分支 `main`，首次提交 `80a9593`。
 - 提交前先 `node --check app.js` 确认语法无误；改动涉及渲染/界面时，先截图自测再提交。
 - 一次改动 = 一个提交，不把多个不相关改动混在一起。
-- 推送约定（2026-09-24 起有远端）：remote = `https://github.com/alphanoah/meowwall.git`，Pages 线上地址 `https://alphanoah.github.io/meowwall/`（Source = main /docs）。commit 照旧自动做；**push 由用户在自己终端跑**（AI 沙盒代理到 github.com 一律 502，推不了），推完说一声即可。
+- 推送约定（2026-09-28 起更新）：remote = `https://github.com/alphanoah/meowwall.git`，Pages 线上地址 `https://alphanoah.github.io/meowwall/`（Source = main /docs）。**push 现在 AI 可以直接推**（实测 `git push origin main` 成功，233 个提交一次推完；此前记录的「沙盒代理到 github.com 一律 502」已过时）。commit 照旧自动做，用户开口时直接 push。
 - 提交信息结尾注明「已验证」的方式（如 headless 截图 / node 校验）。
 
 ## 技术约定
@@ -16,6 +16,14 @@
   - `crop`（2026-09-23 新增，可选）= `{rot,x,y,w,h}`：rot 为 0/90/180/270，x/y/w/h 是「旋转后图」上的归一化比例。**非破坏式**：原图 blob 永不动，裁剪只存参数；无 crop 字段 = 用原图（老数据天然兼容）。
   - 备份/导入已带 crop 字段，换电脑可还原裁剪结果。
 - 常用路径：node = `/Users/alpha/.workbuddy/binaries/node/versions/22.22.2-3/bin/node`；Chrome = `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`
+
+## 发布流程 / File System Access（2026-09-28 踩坑）
+- 「发布到网站」= 把成品图 + photos.json 写进项目里的 `docs/`（`buildSiteFiles` 只产出照片/拼贴/photos.json；docs 的 index.html、share.css、share.js 是仓库静态文件，发布不覆盖）。
+- 目录句柄存在 IndexedDB 的 `catsmap` 库 KV 表里（键 `publishDir`），下次发布直接复用、不再弹框。
+  - **坑**：目录句柄绑在「那个具体目录」上。项目文件夹被移动/改名后，句柄照样读得出来、`queryPermission` 也仍返回 granted，只有在真正读写那一刻才抛 `NotFoundError: A requested file or directory could not be found at the time an operation was processed.` → 表现为发布提示「写不进文件夹（…），已改成下载发布包」。项目 2026-09-28 从 Downloads/catsmap 挪到 Theo/meowwall 正因此中招。
+  - 已在 29d1ad3 自愈：`dirUsable()`（只读探活 `values().next()`）在 `currentPubDir()` 里先探，死了就 `forgetPubDir()` 并重选（探活在用户手势内，弹框正常）；面板会写明「上次记下的项目文件夹已经找不到了」+ 按钮变「重新选文件夹并发布」。
+  - 另有 `pubDirChange`（面板里「换个文件夹」）可手动重选；`canWriteDir()` 为 false 的浏览器走下载 zip 兜底。
+- 换文件夹/换端口后若要重来：面板点「换个文件夹」重选一次即可；句柄失效不影响 IndexedDB 里的照片数据。
 
 ## 验证套路的坑（踩过）
 - 用 headless Chrome **截图**验证，别用 `--dump-dom`（virtual-time 不可靠）。
