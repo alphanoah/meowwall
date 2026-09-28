@@ -2,7 +2,7 @@
 
 ## 版本控制（2026-09-23 用户明确要求）
 - **每完成一次改动，自动执行一次 git 提交**，提交信息写清改了什么（做了什么、为什么、影响哪些文件/功能）。
-- 仓库：`/Users/alpha/Downloads/catsmap`，分支 `main`，首次提交 `80a9593`。
+- 仓库：`/Users/alpha/Theo/meowwall`（2026-09-28 从 `/Users/alpha/Downloads/catsmap` 整体移动过来，GitHub 远端与提交历史不变），分支 `main`，首次提交 `80a9593`。
 - 提交前先 `node --check app.js` 确认语法无误；改动涉及渲染/界面时，先截图自测再提交。
 - 一次改动 = 一个提交，不把多个不相关改动混在一起。
 - 推送约定（2026-09-24 起有远端）：remote = `https://github.com/alphanoah/meowwall.git`，Pages 线上地址 `https://alphanoah.github.io/meowwall/`（Source = main /docs）。commit 照旧自动做；**push 由用户在自己终端跑**（AI 沙盒代理到 github.com 一律 502，推不了），推完说一声即可。
@@ -10,8 +10,8 @@
 
 ## 技术约定
 - 纯前端零依赖：`index.html` + `style.css` + `app.js`，无构建步骤。
-- 本地预览：`cd /Users/alpha/Downloads/catsmap && /Users/alpha/.workbuddy/binaries/python/versions/3.13.12/bin/python3 -m http.server 8848`
-  - **固定用 8848 端口**：照片存在浏览器 IndexedDB，数据绑定「源地址」，换端口 = 换一个空库。
+- 本地预览：`cd /Users/alpha/Theo/meowwall && /Users/alpha/.workbuddy/binaries/python/versions/3.13.12/bin/python3 -m http.server 8848`
+  - **固定用 8848 端口**：照片存在浏览器 IndexedDB，数据绑定「源地址」（host:port，与项目路径无关），换端口 = 换一个空库；项目换文件夹不影响数据。
 - 照片存储：IndexedDB 库 `catsmap` / 表 `photos`（主键 id，字段 name/date/place/note/blob/thumb/w/h/createdAt/crop）。
   - `crop`（2026-09-23 新增，可选）= `{rot,x,y,w,h}`：rot 为 0/90/180/270，x/y/w/h 是「旋转后图」上的归一化比例。**非破坏式**：原图 blob 永不动，裁剪只存参数；无 crop 字段 = 用原图（老数据天然兼容）。
   - 备份/导入已带 crop 字段，换电脑可还原裁剪结果。
@@ -28,6 +28,8 @@
 - 排列方式：2026-09-23 用户明确确认**保留**「按照片数均分」（默认）＋「几 × 几 铺满」两种；此前的「正方格平铺」方案（squareGrid/bestSquareGrid）已永久废弃，**不要再擅自改回**。
 - 单张照片：均分模式下整头完整放入（不裁切）+ 米色留白。
 - 裁剪（2026-09-23 用户三选一确认）：默认 **1:1 正方形**；**上传后自动弹出**逐张裁剪（可「全部保持原样」跳过），卡片上永远有「裁剪」入口可回头改；**支持旋转**（左/右 90°）。比例另提供 自由 / 3:4 / 4:3 预设。
+- 目标进度（2026-09-27 用户四问确认）：口径 = **认识的喵星人数**（名字去重、同户同名合并、合照不算、未命名合并 1 位）；大猫头新增第三模式「目标进度」（每猫一格 + 空格淡爪印，代表照 = 最新单人照，默认选中），原均分/铺满两模式**必须保留**；访客页同步显示进度条；时间对照用**自然年**。
+- 水印（2026-09-27）：文字可自定义（默认 Theo）、「带小猫爪」「对角密排」各为可勾选项，偏好存 localStorage 并随 photos.json 发布（watermark / watermarkPaw / watermarkTile），访客页下载水印同步跟随。爪型绘制要点：每个 ellipse 前必须 moveTo 隔开子路径，否则 canvas 自动补弦线、stroke 会画出穿爪直线。
 
 ## TODO（2026-09-24 用户口述）
 1. ~~叫法统一：所有界面里的「猫咪/只」改成「喵星人」~~ ✅ 2026-09-26 完成（74654e3），全局 grep 无残留，四页回归通过。
