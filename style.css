@@ -186,9 +186,6 @@ body.demo-mode #clearAll{opacity:.4;pointer-events:none;}
 .meta input::placeholder{color:#B7A99B;}
 .meta input:focus{background:#fff;border-color:#EBCFAC;box-shadow:0 0 0 3px rgba(232,137,74,.12);}
 .meta .f-name{font-weight:600;font-size:12.5px;background:none;padding-left:2px;}
-.meta input[type=date]{color:var(--ink-2);font-size:11.5px;padding:4px 6px;flex:none;width:112px;}
-.row{display:flex;gap:6px;align-items:center;}
-.row .f-place{flex:1;}
 .del{
   background:none;color:#C9B8A8;font-size:17px;line-height:1;padding:2px 4px;border-radius:7px;transition:.15s;
 }

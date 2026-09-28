@@ -21,12 +21,12 @@
     </div>
   </div>
   <div class="topbar-right">
-    <div class="stats" id="stats">
+    <div class="stats">
       <div class="stat"><b id="statPhotos">0</b><span>张照片</span></div>
       <div class="stat"><b id="statCats">0</b><span>个喵星人</span></div>
       <div class="stat"><b id="statClients">0</b><span>位客户</span></div>
       <div class="stat"><b id="statLast">—</b><span>最近探访</span></div>
-      <div class="stat-goal" id="statGoal">
+      <div class="stat-goal">
         <div class="sg-head">
           <span id="goalTitle">目标进度</span>
           <span class="sg-right"><em id="goalLeft"></em><button class="mini-btn" id="goalEdit" type="button">改目标</button></span>
@@ -45,7 +45,7 @@
   </div>
 </header>
 
-<div class="demo-bar" id="demoBar">
+<div class="demo-bar">
   <span class="demo-dot" aria-hidden="true"></span>
   <span class="demo-txt"><b>示例模式</b> · 当前显示的是程序画出来的示例照片，<u>不会保存</u>，也不会动到你的真实照片</span>
   <button class="btn-soft" id="demoExit">退出示例</button>
@@ -102,7 +102,7 @@
       <span class="tag" id="mosaicTag">—</span>
     </div>
 
-    <div class="stage" id="stage">
+    <div class="stage">
       <canvas id="mosaic" width="1400" height="1260"></canvas>
     </div>
 
@@ -153,7 +153,7 @@
     </div>
 
     <div class="crop-stage-wrap">
-      <div class="crop-stage" id="cropStage">
+      <div class="crop-stage">
         <canvas id="cropCanvas"></canvas>
         <div class="crop-box" id="cropBox">
           <span class="cg" data-h="nw"></span>
@@ -233,7 +233,7 @@
       <li><code>docs/photos.json</code> 照片清单（<span id="pubCatCount"></span>）</li>
     </ul>
 
-    <p class="pub-dir" id="pubDir">
+    <p class="pub-dir">
       <span id="pubDirTxt"></span>
       <button class="mini-btn" id="pubDirChange" type="button" hidden>换个文件夹</button>
     </p>
@@ -243,13 +243,13 @@
       <span>给图片叠加水印 <em id="wmLabel">Theo + 小猫爪，对角密排</em></span>
     </label>
 
-    <label class="pub-wmrow" id="wmTextRow">
+    <label class="pub-wmrow">
       <span>水印文字</span>
       <input type="text" id="wmTextInput" maxlength="24" placeholder="Theo" spellcheck="false">
       <em>改成你自己的名字或招牌，留空恢复默认 Theo；访客页下载水印同步使用</em>
     </label>
 
-    <div class="pub-wmopts" id="wmOptsRow">
+    <div class="pub-wmopts">
       <span>水印样式</span>
       <span class="pub-opts">
         <label><input type="checkbox" id="wmPawInput" checked> 带小猫爪</label>

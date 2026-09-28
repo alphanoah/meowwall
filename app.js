@@ -435,7 +435,7 @@ async function addFiles(fileList) {
   if (!ok) return toast('这些照片没能读取成功');
   toast(auto ? `已加入 ${ok} 张照片，其中 ${auto} 张按文件名自动填好了名字` : `已加入 ${ok} 张照片`);
   renderStats();
-  renderMosaic(true);
+  renderMosaic();
   openCropQueue(added);   // 上传后紧接着逐张裁剪（可一键全部保持原样）
 }
 
@@ -540,7 +540,7 @@ function enterDemo(count) {
   document.body.classList.add('demo-mode');
   const had = demoSnapshot.length;
   renderList();
-  renderMosaic(true);
+  renderMosaic();
   toast(had ? `已进入示例模式（不会保存），退出后你原来的 ${had} 张照片原样回来` : '已进入示例模式：这些都是画出来的示例，不会保存');
 }
 
@@ -551,7 +551,7 @@ function exitDemo() {
   demoActive = false;
   document.body.classList.remove('demo-mode');
   renderList();
-  renderMosaic(true);
+  renderMosaic();
   toast(photos.length ? `已退出示例，${photos.length} 张照片都还在` : '已退出示例');
 }
 
@@ -787,7 +787,7 @@ $('goalEdit').addEventListener('click', () => {
   goal = { target: n, year: new Date().getFullYear() };
   saveGoal();
   renderStats();
-  renderMosaic(true);
+  renderMosaic();
   toast(`好，${goal.year} 年的目标是 ${n} 位喵星人`);
 });
 
@@ -869,7 +869,7 @@ $('photoList').addEventListener('click', async (e) => {
     if (!confirm(`删除「${catNameOf(rec)}」这张照片？`)) return;
     photos = photos.filter((p) => p.id !== rec.id);
     try { await dbDelete(rec.id); } catch (err) { /* ignore */ }
-    renderList(); renderMosaic(true);
+    renderList(); renderMosaic();
     toast('已删除');
     return;
   }
@@ -946,7 +946,7 @@ function movePhotoTo(rec, targetPid) {
   const at = t ? photos.findIndex((p) => pidOf(p) === t) : -1;
   photos.splice(at < 0 ? 0 : at, 0, rec);
   saveRecord(rec);
-  renderList(); renderMosaic(true);
+  renderList(); renderMosaic();
   const label = t ? `订单 ${t}` : '未编号区';
   toast(`已把「${catNameOf(rec)}」移到${label}${t ? '' : '（可在组头补编号）'}`, {
     label: '撤销',
@@ -955,7 +955,7 @@ function movePhotoTo(rec, targetPid) {
       const cur = photos.indexOf(rec);
       if (cur >= 0) photos.splice(cur, 1);
       photos.splice(Math.min(snap.idx < 0 ? 0 : snap.idx, photos.length), 0, rec);
-      saveRecord(rec); renderList(); renderMosaic(true);
+      saveRecord(rec); renderList(); renderMosaic();
       toast('已撤销，照片回到原来的订单');
     }
   });
@@ -1130,7 +1130,7 @@ function renderSuggest(n, cols) {
   }
 }
 
-function renderMosaic(report) {
+function renderMosaic() {
   const gap = Number($('gap').value);
   const showWhiskers = $('whiskers').checked;
   const loaded = photos.filter((p) => p._bitmap);
@@ -1917,13 +1917,6 @@ function download() {
 /* =========================================================
    导出备份 / 导入恢复
    ========================================================= */
-const blobToDataURL = (b) => new Promise((resolve, reject) => {
-  const r = new FileReader();
-  r.onload = () => resolve(r.result);
-  r.onerror = () => reject(r.error);
-  r.readAsDataURL(b);
-});
-
 /* 备份 = ZIP 包：原图二进制（不 base64，体积省约 1/3）+ manifest.json 元数据。
    缩略图不入包，导入时从原图重新生成。 */
 async function buildBackupBlob() {
@@ -2074,7 +2067,7 @@ async function importBackupZip(file) {
   if (!items.length) return toast('备份包里没有照片');
   if (!confirm(`导入 ${items.length} 张照片？将与现有记录按编号合并，同编号的会覆盖。`)) return;
 
-  if (demoActive) { leaveDemoForReal(); renderList(); renderMosaic(true); }
+  if (demoActive) { leaveDemoForReal(); renderList(); renderMosaic(); }
   toast(`正在导入 ${items.length} 张照片…`);
   let ok = 0;
   for (const it of items) {
@@ -2105,7 +2098,7 @@ async function importBackupZip(file) {
     } catch (e) { console.warn('有一张导入失败', e); }
   }
   renderList();
-  renderMosaic(true);
+  renderMosaic();
   renderStats();
   toast(ok ? `已恢复 ${ok} 张照片` : '导入失败，请检查备份文件');
 }
@@ -2319,7 +2312,7 @@ async function commitCrop(rec, norm) {
 
 function nextInCropQueue() {
   renderList();
-  renderMosaic(true);
+  renderMosaic();
   if (!cropInQueue) return closeCropModal();
   cropIdx++;
   if (cropIdx < cropQueue.length) openCropModal(cropQueue[cropIdx], true);
@@ -2453,16 +2446,16 @@ dz.addEventListener('drop', (e) => {
 });
 dz.addEventListener('click', (e) => { if (!e.target.closest('button')) $('fileInput').click(); });
 
-['density', 'gap'].forEach((id) => $(id).addEventListener('input', () => renderMosaic(true)));
+['density', 'gap'].forEach((id) => $(id).addEventListener('input', () => renderMosaic()));
 $('suggestApply').addEventListener('click', () => {
   const n = photos.filter((p) => p._bitmap).length;
   if (!n) return;
   $('density').value = suggestCols(n);
-  renderMosaic(true);
+  renderMosaic();
   toast('已切到建议档位');
 });
 $('whiskers').addEventListener('change', () => renderMosaic());
-$('shuffle').addEventListener('click', () => { seed = Math.floor(Math.random() * 1e6); renderMosaic(true); });
+$('shuffle').addEventListener('click', () => { seed = Math.floor(Math.random() * 1e6); renderMosaic(); });
 $('download').addEventListener('click', download);
 
 $('modeSeg').addEventListener('click', (e) => {
@@ -2472,7 +2465,7 @@ $('modeSeg').addEventListener('click', (e) => {
   localStorage.setItem('catsmap.layoutMode', layoutMode);
   syncModeButtons();
   syncMode();
-  renderMosaic(true);
+  renderMosaic();
 });
 
 function syncMode() {
@@ -2486,7 +2479,7 @@ $('clearAll').addEventListener('click', async () => {
   photos.forEach((p) => { try { URL.revokeObjectURL(p._thumbUrl); } catch (e) {} });
   photos = [];
   try { await dbClear(); } catch (e) { /* ignore */ }
-  renderList(); renderMosaic(true);
+  renderList(); renderMosaic();
   toast('已清空');
 });
 
@@ -2497,7 +2490,7 @@ $('clearAll').addEventListener('click', async () => {
   // 先渲染首帧（空状态），再异步加载数据，避免阻塞
   syncModeButtons();
   renderList();
-  renderMosaic(true);
+  renderMosaic();
   syncMode();
 
   if (new URLSearchParams(location.search).has('demo')) {
@@ -2529,7 +2522,7 @@ $('clearAll').addEventListener('click', async () => {
   }
 
   renderList();
-  renderMosaic(true);
+  renderMosaic();
 
   if (!storageOK) {
     $('tip').textContent = '⚠️ 当前环境无法使用本地数据库（照片仅在本次页面有效）。用本地 http 服务打开即可长期保存。';
