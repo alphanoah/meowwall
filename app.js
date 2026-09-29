@@ -36,6 +36,45 @@ const canvas = $('mosaic');
 const ctx = canvas.getContext('2d');
 const catPath2D = new Path2D(CAT_PATH);
 
+/* ---------- 背景图相框（可选增强，加载失败自动退回猫头画法） ----------
+   cat-bg.png = 木牌猫相框（中间圆洞放照片格子）。洞几何由图实测：
+   图 1632×1568，洞为正圆（圆心 (809, 769.5)、半径 512，边界即深色描边），
+   按 cover 映射进 1000×900 画布（宽向恰好铺满，纵向溢出上下各裁 ~30px 空白边，
+   猫耳到爪子完整保留）。照片格子、空位爪印、主体格统计全部跟着洞走；
+   页面脚本把 window.CAT_BG_DISABLE 设为 true 可强制走猫头（自测页用）。 */
+const BG_SRC = 'cat-bg.png';
+const BG_MAP = (() => {
+  const k = Math.max(VW / 1632, VH / 1568);
+  return { k, w: 1632 * k, h: 1568 * k, ox: (VW - 1632 * k) / 2, oy: (VH - 1568 * k) / 2 };
+})();
+const BG_HOLE = {
+  cx: 809 * BG_MAP.k + BG_MAP.ox,
+  cy: 769.5 * BG_MAP.k + BG_MAP.oy,
+  r: 512 * BG_MAP.k
+};
+// 照片实际裁剪半径：比洞略收一点（图上洞的描边内缘 ≈503px），让描边完整压在照片边外
+const BG_CLIP_R = 501 * BG_MAP.k;
+const bgHolePath = new Path2D();
+bgHolePath.arc(BG_HOLE.cx, BG_HOLE.cy, BG_HOLE.r, 0, Math.PI * 2);
+const bgPhotoPath = new Path2D();
+bgPhotoPath.arc(BG_HOLE.cx, BG_HOLE.cy, BG_CLIP_R, 0, Math.PI * 2);
+
+let bgImg = null;   // 加载成功后是 HTMLImageElement；null = 还没到 or 加载失败（走猫头）
+const bgReady = (window.CAT_BG_DISABLE || /[?&]nobg\b/.test(location.search))
+  ? Promise.resolve(null)   // 自测页强制走猫头
+  : new Promise((resolve) => {
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = () => resolve(null);
+    im.src = BG_SRC;
+  });
+bgReady.then((im) => {
+  bgImg = im;
+  _coverCache.clear();   // 覆盖率是按形状算的，形状换了必须重算
+  _mainCellsCache.clear();
+  try { renderMosaic(); } catch (e) { /* 启动早期画不了就等首渲染 */ }
+});
+
 /* =========================================================
    工具
    ========================================================= */
@@ -1002,7 +1041,8 @@ $('moveModal').addEventListener('click', (e) => { if (e.target === $('moveModal'
 
 // 均分切分：把整块猫头按张数递归二分，每张照片面积相等（照片少时最自然）
 function sliceRects(n) {
-  if (n <= 1) return [{ x: 0, y: 0, w: VW, h: VH }];
+  const R = contentRect();
+  if (n <= 1) return [{ x: R.x, y: R.y, w: R.w, h: R.h }];
   const out = [];
   (function split(rect, count) {
     if (count <= 1) { out.push(rect); return; }
@@ -1016,16 +1056,17 @@ function sliceRects(n) {
       split({ x: rect.x, y: rect.y, w: rect.w, h: h1 }, first);
       split({ x: rect.x, y: rect.y + h1, w: rect.w, h: rect.h - h1 }, count - first);
     }
-  })({ x: 0, y: 0, w: VW, h: VH }, n);
+  })(R, n);
   return out;
 }
 
-// 规则网格
+// 规则网格（铺在内容区上：猫头 = 整个画布，相框 = 圆洞外接正方形）
 function gridRects(cols, rows) {
-  const tw = VW / cols, th = VH / rows;
+  const R = contentRect();
+  const tw = R.w / cols, th = R.h / rows;
   const out = [];
   for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) out.push({ x: c * tw, y: r * th, w: tw, h: th });
+    for (let c = 0; c < cols; c++) out.push({ x: R.x + c * tw, y: R.y + r * th, w: tw, h: th });
   }
   return out;
 }
@@ -1033,12 +1074,13 @@ function gridRects(cols, rows) {
 // 按照片数挑一个「浪费格子最少、格子又不至于太扁长」的网格
 function autoGrid(n) {
   if (n <= 1) return { cols: 1, rows: 1 };
+  const R = contentRect();
   let best = null;
   let fallback = null;
   for (let c = 1; c <= n; c++) {
     const r = Math.ceil(n / c);
     const waste = c * r - n;
-    const ar = (VW / c) / (VH / r);        // 格子宽高比
+    const ar = (R.w / c) / (R.h / r);        // 格子宽高比
     const cand = { cols: c, rows: r, waste, ar, score: Math.abs(Math.log(ar)) };
     if (!fallback || cand.score < fallback.score) fallback = cand;
     if (ar >= 0.5 && ar <= 2) {            // 排除细长条
@@ -1057,9 +1099,22 @@ function autoGrid(n) {
    按从上到下阅读顺序，边缘格在后用重复照片补满。 */
 const _coverCache = new Map(); // cols -> 每格覆盖率数组（行优先）
 
+// 照片区几何：猫头模式 = 整个画布；相框模式 = 照片圆的外接正方形
+function contentRect() {
+  if (!bgImg) return { x: 0, y: 0, w: VW, h: VH };
+  return { x: BG_HOLE.cx - BG_CLIP_R, y: BG_HOLE.cy - BG_CLIP_R, w: BG_CLIP_R * 2, h: BG_CLIP_R * 2 };
+}
+
+// 当前生效的照片裁剪路径
+function clipPathOf() {
+  return bgImg ? bgPhotoPath : catPath2D;
+}
+
 function cellCoverages(cols, rows) {
   if (_coverCache.has(cols)) return _coverCache.get(cols);
-  const tw = VW / cols, th = VH / rows;
+  const R = contentRect();
+  const tw = R.w / cols, th = R.h / rows;
+  const path = clipPathOf();
   const out = [];
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1067,10 +1122,10 @@ function cellCoverages(cols, rows) {
     for (let c = 0; c < cols; c++) {
       let inside = 0;
       for (let sy = 0; sy < 9; sy++) {
-        const py = r * th + (th * (sy + 0.5)) / 9;
+        const py = R.y + r * th + (th * (sy + 0.5)) / 9;
         for (let sx = 0; sx < 9; sx++) {
-          const px = c * tw + (tw * (sx + 0.5)) / 9;
-          if (ctx.isPointInPath(catPath2D, px, py)) inside++;
+          const px = R.x + c * tw + (tw * (sx + 0.5)) / 9;
+          if (ctx.isPointInPath(path, px, py)) inside++;
         }
       }
       out.push(inside / 81);
@@ -1099,15 +1154,22 @@ function mainFirstRects(cols, rows) {
    （如 8×8=20：第 3~6 列 × 第 3~7 行；10×9=34，与用户截图清点相同）。 */
 const MAIN_CELLS = [9, 10, 13, 20, 28, 34, 41, 48, 61, 72, 89, 98, 114, 128, 146, 156, 169, 188]; // 5~22 列
 
-const mainCellsOf = (cols) =>
-  MAIN_CELLS[Math.max(0, Math.min(MAIN_CELLS.length - 1, Math.round(cols) - 5))] || 0;
+const _mainCellsCache = new Map(); // 相框模式下按列数现算的完整格数
+function mainCellsOf(cols) {
+  cols = Math.max(5, Math.min(22, Math.round(cols)));
+  if (!bgImg) return MAIN_CELLS[cols - 5] || 0;   // 猫头：查实测表
+  if (_mainCellsCache.has(cols)) return _mainCellsCache.get(cols);
+  const m = cellCoverages(cols, gridRowsOf(cols)).filter((v) => v >= 0.95).length;
+  _mainCellsCache.set(cols, m);
+  return m;
+}
 
-const gridRowsOf = (cols) => Math.ceil(VH / (VW / cols));
+const gridRowsOf = (cols) => (bgImg ? cols : Math.ceil(VH / (VW / cols))); // 圆洞外接正方形 → 方阵
 
 // 建议列数 = 「完整格数 ≥ 照片数」的最小列数（格子能多大就多大）；
-// 照片多于 188 张（22×21 的完整格上限）时只能返回上限 22
+// 照片多于 22 列的完整格上限时只能返回上限 22
 function suggestCols(n) {
-  for (let c = 5; c <= 22; c++) if (MAIN_CELLS[c - 5] >= n) return c;
+  for (let c = 5; c <= 22; c++) if (mainCellsOf(c) >= n) return c;
   return 22;
 }
 
@@ -1127,7 +1189,7 @@ function renderSuggest(n, cols) {
     if (sugMain < n) {
       btn.hidden = true;
       $('suggestTxt').textContent =
-        `当前 ${cols} × ${gridRowsOf(cols)} 只有 ${curMain} 个完整格，放不下 ${n} 张；已到上限 22 × 21（${sugMain} 个完整格），多出的只能进边缘`;
+        `当前 ${cols} × ${gridRowsOf(cols)} 只有 ${curMain} 个完整格，放不下 ${n} 张；已到上限 22 × ${gridRowsOf(22)}（${sugMain} 个完整格），多出的只能进边缘`;
     } else {
       btn.hidden = false;
       $('suggestTxt').textContent =
@@ -1159,7 +1221,7 @@ function renderMosaic() {
   $('gapVal').textContent = gap;
 
   if (!n) {
-    note = '上传照片后，会按张数自动均分猫头';
+    note = bgImg ? '上传照片后，会按张数自动均分相框圆窗' : '上传照片后，会按张数自动均分猫头';
     tagText = '等待照片';
   } else if (layoutMode === 'goal') {
     const roster = catRoster().filter((c) => c.rep._bitmap);
@@ -1176,14 +1238,15 @@ function renderMosaic() {
     rects = mainFirstRects(cols, gridRows);
     const repeat = Math.max(1, Math.round(rects.length / n));
     const main = mainCellsOf(cols);
+    const inside = bgImg ? '格在相框圆窗内完整展示' : '格在猫头主体内完整展示';
     const promise = main >= n
       ? `主体格优先：每张照片都先完整放进主体格，其余格循环补满（每张约出现 ${repeat} 次）`
       : `主体格优先：完整格 ${main} 个不够 ${n} 张，多出的照片会落到边缘格`;
-    note = `几 × 几 铺满：${cols} × ${gridRows} = ${rects.length} 格，其中 ${main} 格在猫头主体内完整展示；${promise}`;
+    note = `几 × 几 铺满：${cols} × ${gridRows} = ${rects.length} 格，其中 ${main} ${inside}；${promise}`;
     tagText = `${n} 张照片 · ${cols} × ${gridRows}`;
   } else if (n === 1) {
     rects = sliceRects(1);
-    note = '只有 1 张照片：整张放进猫头里，完全不重复';
+    note = bgImg ? '只有 1 张照片：整张放进相框圆窗里，完全不重复' : '只有 1 张照片：整张放进猫头里，完全不重复';
     tagText = '1 张照片 · 整头 1 块';
   } else if (n <= 8) {
     rects = sliceRects(n);
@@ -1204,19 +1267,28 @@ function renderMosaic() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
 
-  // 1) 猫头底影
-  ctx.save();
-  ctx.shadowColor = 'rgba(140,100,62,.22)';
-  ctx.shadowBlur = 26;
-  ctx.shadowOffsetY = 12;
-  ctx.fillStyle = '#fff';
-  ctx.fill(catPath2D);
-  ctx.restore();
+  // 1) 底：相框模式画木牌相框图（自带投影，洞是透明的）；猫头模式画白底 + 投影
+  if (bgImg) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(140,100,62,.22)';
+    ctx.shadowBlur = 26;
+    ctx.shadowOffsetY = 12;
+    ctx.drawImage(bgImg, BG_MAP.ox, BG_MAP.oy, BG_MAP.w, BG_MAP.h);
+    ctx.restore();
+  } else {
+    ctx.save();
+    ctx.shadowColor = 'rgba(140,100,62,.22)';
+    ctx.shadowBlur = 26;
+    ctx.shadowOffsetY = 12;
+    ctx.fillStyle = '#fff';
+    ctx.fill(catPath2D);
+    ctx.restore();
+  }
 
   if (n) {
-    // 2) 拼贴（裁剪在猫头内）
+    // 2) 拼贴（裁剪在猫头/相框圆窗内）
     ctx.save();
-    ctx.clip(catPath2D);
+    ctx.clip(clipPathOf());
     const order = goalCellRecs ? null : shuffleWithSeed(loaded, seed);
     rects.forEach((rc, i) => {
       const rec = goalCellRecs ? goalCellRecs[i] : order[i % order.length];
@@ -1242,6 +1314,15 @@ function renderMosaic() {
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, VW, VH);
     ctx.restore();
+  } else if (bgImg) {
+    // 空状态：相框已画，提示文字放进圆窗里
+    ctx.fillStyle = '#C4B2A1';
+    ctx.textAlign = 'center';
+    ctx.font = '600 40px system-ui,-apple-system,"PingFang SC",sans-serif';
+    ctx.fillText('还没有照片', BG_HOLE.cx, BG_HOLE.cy - 60);
+    ctx.font = '400 26px system-ui,-apple-system,"PingFang SC",sans-serif';
+    ctx.fillText('上传喂猫时拍的喵星人头像', BG_HOLE.cx, BG_HOLE.cy - 10);
+    ctx.fillText('它们会拼进这个相框', BG_HOLE.cx, BG_HOLE.cy + 28);
   } else {
     // 空状态：虚线轮廓 + 提示
     ctx.save();
@@ -1260,8 +1341,8 @@ function renderMosaic() {
     ctx.fillText('它们会拼成这个猫头', 500, 628);
   }
 
-  // 3) 轮廓
-  if (showWhiskers) {
+  // 3) 轮廓（相框模式：图自带描边，不再另描）
+  if (showWhiskers && !bgImg) {
     ctx.save();
     ctx.lineJoin = 'round';
     ctx.lineWidth = 9;
@@ -1586,10 +1667,26 @@ async function watermarkBlob(blob, clipCat) {
   x.drawImage(bmp, 0, 0);
   drawWatermark(x, w, h);
   if (clipCat) {
-    x.setTransform(SCALE, 0, 0, SCALE, 0, 0);
-    x.globalCompositeOperation = 'destination-in';   // 只留猫头形状内的像素
-    x.fillStyle = '#fff';
-    x.fill(catPath2D);
+    if (bgImg) {
+      // 相框模式：水印只留在「木牌相框 ∪ 圆洞」内，相框外的透明区不沾水印
+      const m = document.createElement('canvas');
+      m.width = w; m.height = h;
+      const mx = m.getContext('2d');
+      mx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+      mx.drawImage(bgImg, BG_MAP.ox, BG_MAP.oy, BG_MAP.w, BG_MAP.h);
+      mx.fillStyle = '#fff';
+      mx.beginPath();
+      mx.arc(BG_HOLE.cx, BG_HOLE.cy, BG_HOLE.r, 0, Math.PI * 2);
+      mx.fill();
+      x.setTransform(1, 0, 0, 1, 0, 0);
+      x.globalCompositeOperation = 'destination-in';   // 只留蒙版形状内的像素
+      x.drawImage(m, 0, 0);
+    } else {
+      x.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+      x.globalCompositeOperation = 'destination-in';   // 只留猫头形状内的像素
+      x.fillStyle = '#fff';
+      x.fill(catPath2D);
+    }
     x.setTransform(1, 0, 0, 1, 0, 0);
     x.globalCompositeOperation = 'source-over';
   }

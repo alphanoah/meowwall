@@ -15,7 +15,7 @@
 <h2>主体格优先填充 自测</h2>
 <div id="status">等待 iframe 就绪…</div>
 <pre id="out"></pre>
-<iframe id="app" src="/index.html?demo"></iframe>
+<iframe id="app" src="/index.html?demo&nobg"></iframe><!-- nobg：本页基准表按猫头测，强制走猫头分支 -->
 <script>
 const out = [];
 function log(s) { out.push(s); document.getElementById('out').textContent = out.join('\n'); }
