@@ -34,8 +34,14 @@ input{font-family:inherit;}
 }
 .stage canvas{
   display:block;
-  width:min(100%,940px);height:auto;
+  /* 宽高都交给 max-* 约束、都保持 auto，再显式锁定内在比例：
+     不能写死 width 又同时给 max-height —— 那样宽度被钉死、height:auto 的高度被强压，
+     画面会纵向压扁（1440×900 压 22%、1280×720 压 66%，屏幕上「相框和照片都扁了」）。
+     aspect-ratio 让两个方向的约束一起生效、等比缩放。 */
+  width:auto;height:auto;
+  max-width:min(100%,940px);
   max-height:calc(100dvh - 210px);
+  aspect-ratio:1400/1260;
   border-radius:20px;
   /* 拦掉手机长按的「存储图像」原生菜单，长按改由 share.js 接管（存出来带水印） */
   -webkit-touch-callout:none;
