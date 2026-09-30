@@ -21,6 +21,8 @@
 
 ## 发布流程 / File System Access（2026-09-28 踩坑）
 - 「发布到网站」= 把成品图 + photos.json 写进项目里的 `docs/`（`buildSiteFiles` 只产出照片/拼贴/photos.json；docs 的 index.html、share.css、share.js 是仓库静态文件，发布不覆盖）。
+- 访客页相框（2026-09-30 起，91a0841）：docs/share.js 也支持木牌相框，几何与工作台同源（BG_MAP/BG_HOLE/BG_CLIP_R，**改一边必须同步另一边**）。清单 `bgFrame:true` 且同目录有 cat-bg.png 才用相框，否则退回猫头；发布时工作台勾着相框才把 cat-bg.png 一起发布；访客页有自己的「相框底图」开关，相框模式下「轮廓+胡须」置灰。发布 toast 三条路径都带「打开访客页」跳转 + 顶栏有常驻「打开访客页」按钮（window.open 必须留在点击手势里，不能先 await 探测，否则被拦）。
+  - 像素回归坑：访客页随机挂件（widgetToggle）会污染截图，比对前先关；相框站与猫头站默认档位不同（按形状算），跨页比对要显式设同一 density/gap。
 - 目录句柄存在 IndexedDB 的 `catsmap` 库 KV 表里（键 `publishDir`），下次发布直接复用、不再弹框。
   - **坑**：目录句柄绑在「那个具体目录」上。项目文件夹被移动/改名后，句柄照样读得出来、`queryPermission` 也仍返回 granted，只有在真正读写那一刻才抛 `NotFoundError: A requested file or directory could not be found at the time an operation was processed.` → 表现为发布提示「写不进文件夹（…），已改成下载发布包」。项目 2026-09-28 从 Downloads/catsmap 挪到 Theo/meowwall 正因此中招。
   - 已在 29d1ad3 自愈：`dirUsable()`（只读探活 `values().next()`）在 `currentPubDir()` 里先探，死了就 `forgetPubDir()` 并重选（探活在用户手势内，弹框正常）；面板会写明「上次记下的项目文件夹已经找不到了」+ 按钮变「重新选文件夹并发布」。
