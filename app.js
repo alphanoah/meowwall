@@ -40,8 +40,9 @@ const catPath2D = new Path2D(CAT_PATH);
    cat-bg.png = 木牌猫相框（中间圆洞放照片格子）。洞几何由图实测：
    图 1632×1568，洞为正圆（圆心 (809, 769.5)、半径 512，边界即深色描边），
    按 cover 映射进 1000×900 画布（宽向恰好铺满，纵向溢出上下各裁 ~30px 空白边，
-   猫耳到爪子完整保留）。照片格子、空位爪印、主体格统计全部跟着洞走；
-   页面脚本把 window.CAT_BG_DISABLE 设为 true 可强制走猫头（自测页用）。 */
+   猫耳到爪子完整保留）。照片格子、空位爪印、主体格统计全部跟着洞走。
+   工作台可勾选「木牌相框底图 / 猫头轮廓」来回切（记忆在 localStorage）；
+   页面脚本把 window.CAT_BG_DISABLE 设为 true（或 URL 带 ?nobg）强制走猫头（自测页用）。 */
 const BG_SRC = 'cat-bg.png';
 const BG_MAP = (() => {
   const k = Math.max(VW / 1632, VH / 1568);
@@ -59,21 +60,47 @@ bgHolePath.arc(BG_HOLE.cx, BG_HOLE.cy, BG_HOLE.r, 0, Math.PI * 2);
 const bgPhotoPath = new Path2D();
 bgPhotoPath.arc(BG_HOLE.cx, BG_HOLE.cy, BG_CLIP_R, 0, Math.PI * 2);
 
-let bgImg = null;   // 加载成功后是 HTMLImageElement；null = 还没到 or 加载失败（走猫头）
-const bgReady = (window.CAT_BG_DISABLE || /[?&]nobg\b/.test(location.search))
-  ? Promise.resolve(null)   // 自测页强制走猫头
-  : new Promise((resolve) => {
-    const im = new Image();
-    im.onload = () => resolve(im);
-    im.onerror = () => resolve(null);
-    im.src = BG_SRC;
-  });
+const BG_FORCED = !!(window.CAT_BG_DISABLE || /[?&]nobg\b/.test(location.search)); // 自测页强制猫头
+
+let bgLoaded = null;    // 图加载成功后的 HTMLImageElement；null = 还没到 or 加载失败
+let useBgFrame = !BG_FORCED && localStorage.getItem('catsmap.bgFrame') !== '0';  // 勾选状态，默认开
+let bgImg = null;       // 当前生效的底图：勾选且加载成功才有值，否则 null = 走猫头
+
+const bgReady = BG_FORCED ? Promise.resolve(null) : new Promise((resolve) => {
+  const im = new Image();
+  im.onload = () => resolve(im);
+  im.onerror = () => resolve(null);
+  im.src = BG_SRC;
+});
 bgReady.then((im) => {
-  bgImg = im;
+  bgLoaded = im;
+  bgImg = useBgFrame ? im : null;
   _coverCache.clear();   // 覆盖率是按形状算的，形状换了必须重算
   _mainCellsCache.clear();
+  syncBgFrameCtl();
   try { renderMosaic(); } catch (e) { /* 启动早期画不了就等首渲染 */ }
 });
+
+/* 勾选/取消「木牌相框底图」：底图换了 = 内容区形状换了，
+   覆盖率/主体格缓存必须清掉再重绘（格数、建议值、文案都跟着变）。 */
+function setBgFrame(on) {
+  useBgFrame = !!on;
+  localStorage.setItem('catsmap.bgFrame', useBgFrame ? '1' : '0');
+  bgImg = useBgFrame ? bgLoaded : null;
+  _coverCache.clear();
+  _mainCellsCache.clear();
+  syncBgFrameCtl();
+  renderMosaic();
+}
+
+/* 图没加载出来（或自测页强制猫头）就没有可切的东西：藏掉这个勾选。 */
+function syncBgFrameCtl() {
+  const ctl = $('bgFrameCtl');
+  if (!ctl) return;
+  ctl.hidden = !bgLoaded;
+  const box = $('bgFrame');
+  if (box) box.checked = useBgFrame;
+}
 
 /* =========================================================
    工具
@@ -2584,6 +2611,7 @@ $('suggestApply').addEventListener('click', () => {
   toast('已切到建议档位');
 });
 $('whiskers').addEventListener('change', () => renderMosaic());
+$('bgFrame').addEventListener('change', (e) => setBgFrame(e.target.checked));
 $('shuffle').addEventListener('click', () => { seed = Math.floor(Math.random() * 1e6); renderMosaic(); });
 $('download').addEventListener('click', download);
 
