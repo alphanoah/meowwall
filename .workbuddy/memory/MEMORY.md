@@ -11,6 +11,7 @@
 ## 技术约定
 - 纯前端零依赖：`index.html` + `style.css` + `app.js`，无构建步骤。
 - 拼贴底图（2026-09-30 起）：「木牌猫相框」背景图（`cat-bg.png`，中间圆洞放照片格子），真源 = app.js 的 `BG_MAP`/`BG_HOLE`（洞几何由图实测）+ `BG_CLIP_R`。**换背景图必须重新实测洞几何并复测主体格数**（testenv/measure-cells.js 可出数）。图加载失败自动退回猫头画法；工作台「木牌相框底图」勾选可来回切（localStorage `catsmap.bgFrame`，默认开），`?nobg` / `window.CAT_BG_DISABLE` 强制猫头（自测页 test-mainfirst 的 iframe 用，其基准表按猫头固化，勾选在这两种情况下自动隐藏）。顶栏 logo 仍是旧猫头（index.html 内联 SVG，不共用）。
+- 控制区固定分区（2026-09-30 起）：**每个控件常驻、位置只跟窗口宽度有关**——切换排列方式/建议值增减不再引起控件换行跳动（1029bb9）。「照片块数」非铺满模式置灰（`.ctl.is-idle` 置灰 + input disabled + title 说明）不消失；建议值行常驻（无建议时 `.suggest.is-idle` 灰字静默），`min-height:42px` 恒定两行；相框底图未就绪用 `.ctl.off{visibility:hidden}` 占位（不用 hidden/display:none，就绪后原地出现、零重排）。**坑：`.suggest` 是 flex-basis:100% 的整行，DOM 里必须放在所有控件之后**——插在中间会把后面的控件全挤到下一行（第一版就栽在这）。验证留档 testenv/test-ctl-stable.js（三视口 × 三模式逐控件坐标比对）。
 - 本地预览：`cd /Users/alpha/Theo/meowwall && /Users/alpha/.workbuddy/binaries/python/versions/3.13.12/bin/python3 -m http.server 8848`
   - **固定用 8848 端口**：照片存在浏览器 IndexedDB，数据绑定「源地址」（host:port，与项目路径无关），换端口 = 换一个空库；项目换文件夹不影响数据。
 - 照片存储：IndexedDB 库 `catsmap` / 表 `photos`（主键 id，字段 name/date/place/note/blob/thumb/w/h/createdAt/crop）。
