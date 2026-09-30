@@ -102,6 +102,11 @@ body.hide-overview .overview.ready{opacity:0;transform:translateY(-6px);}
 .ctl input[type=range]{width:104px;accent-color:var(--accent);}
 .ctl.switch{cursor:pointer;gap:6px;}
 .ctl.switch input{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;}
+/* .ctl 是 flex，不写这条 hidden 属性会失效（同工作台 .ctl[hidden] 的坑） */
+.ctl[hidden]{display:none;}
+/* 相框模式下图自带描边，「轮廓 + 胡须」不起作用：置灰但留在原位，底栏不跳 */
+.ctl.is-idle{opacity:.45;}
+.ctl.is-idle input{cursor:not-allowed;}
 .seg-btns{display:flex;gap:2px;background:var(--bg-2);border-radius:99px;padding:3px;}
 .seg-btns button{
   font-size:12.5px;color:var(--ink-2);padding:6px 13px;border-radius:99px;transition:.16s;white-space:nowrap;

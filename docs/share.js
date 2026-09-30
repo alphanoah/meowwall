@@ -1,11 +1,13 @@
 /* =========================================================
    喵星人头像墙 · 访客页
-   只做一件事：把 meowtonians/ 里的照片拼成一个大猫头。
+   只做一件事：把 meowtonians/ 里的照片拼成一个大猫头（或拼进木牌相框的圆窗里）。
 
    · 照片清单来自同目录的 photos.json（由工作台「发布到网站」生成）
    · 拼贴核心与工作台 app.js 的对应段落保持一致（改一边记得同步另一边）
    · 发布出来的照片已经是裁剪成品，所以这里不需要裁剪/旋转参数
    · 访客点「下载这张」拿到的整张图会盖一层水印（页面上的显示保持干净）
+   · 底图：photos.json 里 bgFrame=true 且同目录有 cat-bg.png 时用木牌相框
+     （工作台勾了「木牌相框底图」才会把这张图一起发布），否则退回猫头画法
    ========================================================= */
 
 /* ---------- 猫头轮廓（唯一真源，与工作台的 logo 一致） ---------- */
@@ -22,12 +24,36 @@ const WHISKERS = [
 
 const MIN_COLS = 5, MAX_COLS = 22;
 
+/* ---------- 木牌相框底图（与工作台 app.js 的对应段落保持一致） ----------
+   cat-bg.png = 木牌猫相框，中间圆洞放照片格子。洞几何由图实测：
+   图 1632×1568，洞为正圆（圆心 (809, 769.5)、半径 512），
+   按 cover 映射进 1000×900 画布（宽向恰好铺满，纵向上下各裁 ~30px 空白边）。 */
+const BG_SRC = 'cat-bg.png';
+const BG_MAP = (() => {
+  const k = Math.max(VW / 1632, VH / 1568);
+  return { k, w: 1632 * k, h: 1568 * k, ox: (VW - 1632 * k) / 2, oy: (VH - 1568 * k) / 2 };
+})();
+const BG_HOLE = {
+  cx: 809 * BG_MAP.k + BG_MAP.ox,
+  cy: 769.5 * BG_MAP.k + BG_MAP.oy,
+  r: 512 * BG_MAP.k
+};
+// 照片实际裁剪半径：比洞略收一点（图上洞的描边内缘 ≈503px），让描边完整压在照片边外
+const BG_CLIP_R = 501 * BG_MAP.k;
+const bgPhotoPath = new Path2D();
+bgPhotoPath.arc(BG_HOLE.cx, BG_HOLE.cy, BG_CLIP_R, 0, Math.PI * 2);
+
+let bgLoaded = null;          // 图成功加载后的 HTMLImageElement；null = 还没到 or 加载失败
+let useBgFrame = false;       // 是否用相框（photos.json 的 bgFrame 决定初始值，访客可再切）
+let bgImg = null;             // 当前生效的底图：用相框且图加载成功才有值，否则 null = 走猫头
+
 /* ---------- 状态 ---------- */
 let photos = [];              // { file, name, _bitmap }
 let meta = null;
 let seed = 7;
 let layoutMode = 'grid';      // 访客页默认「几 × 几 铺满」
 let ready = false;
+let layoutTouched = false;    // 访客动过滑块/排列方式后，默认档位就不再回头覆盖他的选择
 
 /* ---------- DOM ---------- */
 const $ = (id) => document.getElementById(id);
@@ -59,9 +85,21 @@ function shuffleWithSeed(arr, s) {
    版面计算
    ========================================================= */
 
-// 均分切分：把整块猫头按张数递归二分，每张照片面积相等（照片少时最自然）
+// 照片区几何：猫头模式 = 整个画布；相框模式 = 照片圆的外接正方形
+function contentRect() {
+  if (!bgImg) return { x: 0, y: 0, w: VW, h: VH };
+  return { x: BG_HOLE.cx - BG_CLIP_R, y: BG_HOLE.cy - BG_CLIP_R, w: BG_CLIP_R * 2, h: BG_CLIP_R * 2 };
+}
+
+// 当前生效的照片裁剪路径（猫头轮廓 / 相框圆窗）
+function clipPathOf() {
+  return bgImg ? bgPhotoPath : catPath2D;
+}
+
+// 均分切分：把整块照片区按张数递归二分，每张照片面积相等（照片少时最自然）
 function sliceRects(n) {
-  if (n <= 1) return [{ x: 0, y: 0, w: VW, h: VH }];
+  const R = contentRect();
+  if (n <= 1) return [{ x: R.x, y: R.y, w: R.w, h: R.h }];
   const out = [];
   (function split(rect, count) {
     if (count <= 1) { out.push(rect); return; }
@@ -75,16 +113,17 @@ function sliceRects(n) {
       split({ x: rect.x, y: rect.y, w: rect.w, h: h1 }, first);
       split({ x: rect.x, y: rect.y + h1, w: rect.w, h: rect.h - h1 }, count - first);
     }
-  })({ x: 0, y: 0, w: VW, h: VH }, n);
+  })(R, n);
   return out;
 }
 
 // 规则网格
 function gridRects(cols, rows) {
-  const tw = VW / cols, th = VH / rows;
+  const R = contentRect();
+  const tw = R.w / cols, th = R.h / rows;
   const out = [];
   for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) out.push({ x: c * tw, y: r * th, w: tw, h: th });
+    for (let c = 0; c < cols; c++) out.push({ x: R.x + c * tw, y: R.y + r * th, w: tw, h: th });
   }
   return out;
 }
@@ -92,12 +131,13 @@ function gridRects(cols, rows) {
 // 按照片数挑一个「浪费格子最少、格子又不至于太扁长」的网格
 function autoGrid(n) {
   if (n <= 1) return { cols: 1, rows: 1 };
+  const R = contentRect();
   let best = null;
   let fallback = null;
   for (let c = 1; c <= n; c++) {
     const r = Math.ceil(n / c);
     const waste = c * r - n;
-    const ar = (VW / c) / (VH / r);
+    const ar = (R.w / c) / (R.h / r);
     const cand = { cols: c, rows: r, waste, ar, score: Math.abs(Math.log(ar)) };
     if (!fallback || cand.score < fallback.score) fallback = cand;
     if (ar >= 0.5 && ar <= 2) {
@@ -117,7 +157,9 @@ const _coverCache = new Map(); // cols -> 每格覆盖率数组（行优先）
 
 function cellCoverages(cols, rows) {
   if (_coverCache.has(cols)) return _coverCache.get(cols);
-  const tw = VW / cols, th = VH / rows;
+  const R = contentRect();
+  const tw = R.w / cols, th = R.h / rows;
+  const path = clipPathOf();
   const out = [];
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -125,10 +167,10 @@ function cellCoverages(cols, rows) {
     for (let c = 0; c < cols; c++) {
       let inside = 0;
       for (let sy = 0; sy < 9; sy++) {
-        const py = r * th + (th * (sy + 0.5)) / 9;
+        const py = R.y + r * th + (th * (sy + 0.5)) / 9;
         for (let sx = 0; sx < 9; sx++) {
-          const px = c * tw + (tw * (sx + 0.5)) / 9;
-          if (ctx.isPointInPath(catPath2D, px, py)) inside++;
+          const px = R.x + c * tw + (tw * (sx + 0.5)) / 9;
+          if (ctx.isPointInPath(path, px, py)) inside++;
         }
       }
       out.push(inside / 81);
@@ -149,17 +191,26 @@ function mainFirstRects(cols, rows) {
     .map((i) => rects[i]);
 }
 
-/* ---------- 每档列数的完整格数（与工作台实测值一致） ---------- */
+/* ---------- 完整格（主体格）数 ----------
+   猫头模式用实测表（每档列数下被猫头完整覆盖的格子数）；
+   相框模式的形状是正圆，表不适用，直接按当前列数现算（结果缓存）。 */
 const MAIN_CELLS = [9, 10, 13, 20, 28, 34, 41, 48, 61, 72, 89, 98, 114, 128, 146, 156, 169, 188]; // 5~22 列
 
-const mainCellsOf = (cols) =>
-  MAIN_CELLS[Math.max(0, Math.min(MAIN_CELLS.length - 1, Math.round(cols) - 5))] || 0;
+const _mainCellsCache = new Map(); // 相框模式下按列数现算的完整格数
+function mainCellsOf(cols) {
+  cols = Math.max(MIN_COLS, Math.min(MAX_COLS, Math.round(cols)));
+  if (!bgImg) return MAIN_CELLS[cols - MIN_COLS] || 0;   // 猫头：查实测表
+  if (_mainCellsCache.has(cols)) return _mainCellsCache.get(cols);
+  const m = cellCoverages(cols, gridRowsOf(cols)).filter((v) => v >= 0.95).length;
+  _mainCellsCache.set(cols, m);
+  return m;
+}
 
-const gridRowsOf = (cols) => Math.ceil(VH / (VW / cols));
+const gridRowsOf = (cols) => (bgImg ? cols : Math.ceil(VH / (VW / cols))); // 相框 = 圆洞外接正方形 → 方阵
 
 // 建议列数 = 「完整格数 ≥ 照片数」的最小列数（格子能多大就多大）
 function suggestCols(n) {
-  for (let c = MIN_COLS; c <= MAX_COLS; c++) if (MAIN_CELLS[c - MIN_COLS] >= n) return c;
+  for (let c = MIN_COLS; c <= MAX_COLS; c++) if (mainCellsOf(c) >= n) return c;
   return MAX_COLS;
 }
 
@@ -197,10 +248,12 @@ function render() {
   } else if (layoutMode === 'grid') {
     rects = mainFirstRects(cols, gridRows);
     const main = mainCellsOf(cols);
-    note = `${n} 张照片铺成 ${cols} × ${gridRows}；其中 ${main} 格落在猫头主体内`;
+    note = bgImg
+      ? `${n} 张照片铺成 ${cols} × ${gridRows}；其中 ${main} 格落在相框圆窗内`
+      : `${n} 张照片铺成 ${cols} × ${gridRows}；其中 ${main} 格落在猫头主体内`;
   } else if (n === 1) {
     rects = sliceRects(1);
-    note = '整张猫头就是这一张';
+    note = bgImg ? '整张放进相框圆窗里，完全不重复' : '整张猫头就是这一张';
   } else if (n <= 8) {
     rects = sliceRects(n);
     note = `${n} 张照片平均分成 ${n} 块，每张只出现一次`;
@@ -215,18 +268,27 @@ function render() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
 
-  // 1) 猫头底影
-  ctx.save();
-  ctx.shadowColor = 'rgba(140,100,62,.22)';
-  ctx.shadowBlur = 26;
-  ctx.shadowOffsetY = 12;
-  ctx.fillStyle = '#fff';
-  ctx.fill(catPath2D);
-  ctx.restore();
+  // 1) 底：相框模式画木牌相框图（自带投影，洞是透明的）；猫头模式画白底 + 投影
+  if (bgImg) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(140,100,62,.22)';
+    ctx.shadowBlur = 26;
+    ctx.shadowOffsetY = 12;
+    ctx.drawImage(bgImg, BG_MAP.ox, BG_MAP.oy, BG_MAP.w, BG_MAP.h);
+    ctx.restore();
+  } else {
+    ctx.save();
+    ctx.shadowColor = 'rgba(140,100,62,.22)';
+    ctx.shadowBlur = 26;
+    ctx.shadowOffsetY = 12;
+    ctx.fillStyle = '#fff';
+    ctx.fill(catPath2D);
+    ctx.restore();
+  }
 
-  // 2) 拼贴（裁剪在猫头内）
+  // 2) 拼贴（裁剪在猫头 / 相框圆窗内）
   ctx.save();
-  ctx.clip(catPath2D);
+  ctx.clip(clipPathOf());
   const order = shuffleWithSeed(loaded, seed);
   rects.forEach((rc, i) => {
     const rec = order[i % order.length];
@@ -245,8 +307,8 @@ function render() {
   ctx.fillRect(0, 0, VW, VH);
   ctx.restore();
 
-  // 3) 轮廓 + 胡须
-  if (showWhiskers) {
+  // 3) 轮廓 + 胡须（相框模式：图自带描边，不再另描）
+  if (showWhiskers && !bgImg) {
     ctx.save();
     ctx.lineJoin = 'round';
     ctx.lineWidth = 9;
@@ -297,6 +359,53 @@ function setProgress(done, total) {
   txt.textContent = `正在铺满猫头… ${done} / ${total}`;
 }
 
+/* ---------- 相框底图 ----------
+   清单（photos.json）里的 bgFrame 决定访客页默认用不用相框；图取不到就静默退回猫头。
+   加 ?v=updatedAt 是有意的：重新发布后清单变了 → 图也跟着重新取，不被浏览器旧缓存粘住
+   （不加的话，同一地址的图会被缓存住，换过背景图也看不到新的）。 */
+function loadBgFrame(m) {
+  if (!m.bgFrame) { syncFrameCtl(); return; }
+  useBgFrame = true;
+  const im = new Image();
+  im.onload = () => {
+    bgLoaded = im;
+    applyBgFrame();
+    syncFrameCtl();
+    if (ready && !layoutTouched) applyDefaultLayout();   // 形状换了，完整格数/建议列数跟着变
+    else render();
+  };
+  im.onerror = () => { useBgFrame = false; bgLoaded = null; syncFrameCtl(); };
+  im.src = BG_SRC + (m.updatedAt ? '?v=' + encodeURIComponent(m.updatedAt) : '');
+}
+
+// 底图换了 = 照片区形状换了：覆盖率 / 完整格缓存必须清掉再重画
+function applyBgFrame() {
+  bgImg = useBgFrame ? bgLoaded : null;
+  _coverCache.clear();
+  _mainCellsCache.clear();
+}
+
+// 访客手动来回切相框 / 猫头
+function setBgFrame(on) {
+  useBgFrame = !!on;
+  applyBgFrame();
+  syncFrameCtl();
+  render();
+}
+
+/* 没图就藏起这枚开关（没得切就别摆在那儿）。
+   相框模式下图自带描边，「轮廓 + 胡须」不起作用 → 置灰留在原位，避免底栏跳动。 */
+function syncFrameCtl() {
+  const ctl = $('bgFrameCtl');
+  if (ctl) ctl.hidden = !bgLoaded;
+  const box = $('bgFrame');
+  if (box) box.checked = useBgFrame;
+  const wCtl = $('whiskersCtl');
+  if (wCtl) wCtl.classList.toggle('is-idle', !!bgImg);
+  const wBox = $('whiskers');
+  if (wBox) wBox.disabled = !!bgImg;
+}
+
 async function loadPhotos() {
   let data;
   try {
@@ -313,6 +422,7 @@ async function loadPhotos() {
   WM_PAW = meta.watermarkPaw !== false;
   WM_TILE = meta.watermarkTile !== false;
   const list = (Array.isArray(meta.photos) ? meta.photos : []).filter((p) => p && p.file);
+  loadBgFrame(meta);          // 相框底图：清单说用才去取（省一次没必要的下载）
 
   const total = list.length;
   setProgress(0, total);
@@ -572,13 +682,16 @@ function bind() {
     const b = e.target.closest('button[data-mode]');
     if (!b) return;
     layoutMode = b.dataset.mode;
+    layoutTouched = true;
     document.querySelectorAll('#modeSeg button').forEach((x) => x.classList.toggle('on', x === b));
     syncMode();
     render();
   });
-  $('density').addEventListener('input', render);
+  $('density').addEventListener('input', () => { layoutTouched = true; render(); });
   $('gap').addEventListener('input', render);
   $('whiskers').addEventListener('change', render);
+  // 相框 / 猫头来回切（photos.json 说用相框、且图确实在，才显示这枚开关）
+  $('bgFrame').addEventListener('change', (e) => setBgFrame(e.target.checked));
   $('shuffle').addEventListener('click', () => {
     seed = Math.floor(Math.random() * 1e6);
     render();

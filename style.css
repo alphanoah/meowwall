@@ -79,6 +79,18 @@ input{font-family:inherit;}
 .btn-pub:hover{filter:brightness(1.05);}
 .btn-pub:active{transform:translateY(1px);}
 
+/* 发布 + 看访客页：上下两枚按钮一组，「打开访客页」常驻就是发布按钮下面那枚 */
+.pub-block{display:flex;flex-direction:column;gap:7px;align-items:stretch;}
+.btn-visit{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  padding:7px 14px;border-radius:10px;font-weight:600;font-size:12.5px;
+  color:var(--accent-d);background:#FFF6EC;border:1px solid #F1D9BC;
+  transition:.15s;
+}
+.btn-visit svg{width:14px;height:14px;flex:none;}
+.btn-visit:hover{background:#FDEDDA;border-color:#EBC79E;}
+.btn-visit:active{transform:translateY(1px);}
+
 /* ---------- 示例模式横幅 ---------- */
 .demo-bar{
   display:none;align-items:center;gap:12px;flex-wrap:wrap;
@@ -450,7 +462,8 @@ body.moving{overflow:hidden;}
   .brand-txt p{display:none;}
   .stat{min-width:76px;padding:7px 10px;}
   .topbar-right{width:100%;}
-  .btn-pub{flex-basis:100%;justify-content:center;}
+  .pub-block{flex-basis:100%;}                 /* 窄屏：这一组独占一行 */
+  .pub-block .btn-pub{flex-basis:auto;justify-content:center;}
   .stage{padding:10px;}
   .panel{padding:15px;}
 }

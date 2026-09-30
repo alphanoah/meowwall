@@ -35,13 +35,22 @@
         <p class="sg-note" id="goalNote"></p>
       </div>
     </div>
-    <button class="btn-pub" id="publishBtn" title="把照片和清单写进项目里的 docs/，推上 GitHub Pages 就能看（第一次会请你授权选一次项目文件夹）">
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3.9v9.9m0-9.9 3.5 3.5M12 3.9 8.5 7.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M4.8 14.6v3.2c0 1.3 1.05 2.3 2.35 2.3h9.7c1.3 0 2.35-1 2.35-2.3v-3.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-      </svg>
-      <span>发布到网站</span>
-    </button>
+    <div class="pub-block">
+      <button class="btn-pub" id="publishBtn" title="把照片和清单写进项目里的 docs/，推上 GitHub Pages 就能看（第一次会请你授权选一次项目文件夹）">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3.9v9.9m0-9.9 3.5 3.5M12 3.9 8.5 7.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M4.8 14.6v3.2c0 1.3 1.05 2.3 2.35 2.3h9.7c1.3 0 2.35-1 2.35-2.3v-3.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <span>发布到网站</span>
+      </button>
+      <button class="btn-visit" id="openSiteBtn" type="button" title="在新标签页打开访客页（别人看到的那张大猫头，就是 docs/ 里发布出来的）">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M14.2 4.6h5.2v5.2M19.4 4.6l-7.6 7.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M18.4 14.6v3.4c0 1.3-1.05 2.3-2.35 2.3H6.15c-1.3 0-2.35-1-2.35-2.3V8c0-1.3 1.05-2.3 2.35-2.3H9.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <span>打开访客页</span>
+      </button>
+    </div>
   </div>
 </header>
 
@@ -123,7 +132,7 @@
         <span>间隙<em id="gapVal">3</em></span>
         <input type="range" id="gap" min="0" max="12" value="3">
       </label>
-      <label class="ctl switch">
+      <label class="ctl switch" id="whiskersCtl" title="相框模式下不生效（相框图自带描边）">
         <input type="checkbox" id="whiskers" checked>
         <span>轮廓 + 胡须</span>
       </label>

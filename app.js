@@ -101,6 +101,11 @@ function syncBgFrameCtl() {
   ctl.classList.toggle('off', !bgLoaded);
   const box = $('bgFrame');
   if (box) box.checked = useBgFrame;
+  // 相框模式下图自带描边，「轮廓 + 胡须」不起作用 → 置灰但留在原位（布局不动）
+  const wCtl = $('whiskersCtl');
+  if (wCtl) wCtl.classList.toggle('is-idle', !!bgImg);
+  const wBox = $('whiskers');
+  if (wBox) wBox.disabled = !!bgImg;
 }
 
 /* =========================================================
@@ -1755,6 +1760,7 @@ async function buildSiteFiles(watermark) {
     watermarkPaw: wmPaw,                     // 访客页下载水印同步样式（缺省视为 true，兼容旧清单）
     watermarkTile: wmTile,
     goal: { target: goal.target, year: goal.year },   // 访客页目标进度条用（只是数字，无隐私）
+    bgFrame: false,                          // 访客页默认用不用木牌相框（下面按实际情况改写）
     photos: []
   };
 
@@ -1770,6 +1776,18 @@ async function buildSiteFiles(watermark) {
     if (mosaic && watermark) mosaic = await watermarkBlob(mosaic, true);
     if (mosaic) files.push({ path: `${SITE_PHOTO_DIR}/拼贴-大猫头.png`, data: await blobBytes(mosaic) });
   } catch (e) { console.warn('拼贴缩略图生成失败，已跳过', e); }
+
+  // 相框底图：工作台开着「木牌相框底图」就把它一起发布，访客页才能画出同一张相框。
+  // 取图失败不算致命（访客页会自动退回猫头），此时清单里也不写 bgFrame=true，
+  // 免得清单说「有相框」而图又不在——访客页会一脸问号地退回猫头。
+  if (bgImg) {
+    try {
+      const r = await fetch(BG_SRC, { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      files.push({ path: BG_SRC, data: new Uint8Array(await r.arrayBuffer()) });
+      manifest.bgFrame = true;
+    } catch (e) { console.warn('相框底图没取到，访客页会退回猫头画法', e); }
+  }
 
   manifest.count = manifest.photos.length;
   manifest.cats = siteCatCount();
@@ -1894,9 +1912,14 @@ async function writeSiteFiles(docs, files) {
   return n;
 }
 
+/* 打开访客页：右上角「打开访客页」按钮和发布成功提示条上的按钮共用。
+   这里刻意不做任何 await/probe —— window.open 必须留在点击手势里，
+   先探测文件在不在会把弹窗拦掉（浏览器只认手势里的同步调用）。
+   真没发布过的话，访客页自己会写「没找到照片清单」。 */
 function openVisitorPage() {
   if (!/^https?:$/.test(location.protocol)) return toast('要用本地服务器打开工作台才能直接预览访客页');
-  window.open(`${SITE_DIR}/index.html`, '_blank');
+  const w = window.open(`${SITE_DIR}/index.html`, '_blank');
+  if (!w) toast('浏览器拦住了新标签页，允许弹出窗口后再点一次');
 }
 
 // 兜底：浏览器不支持直接写文件夹时，下载一个同样内容的 zip
@@ -1938,7 +1961,7 @@ async function publishSite(watermark) {
     const where = root.name === 'docs' ? 'docs/' : `${root.name}/docs/`;
     toast(`已写进 ${where}（${built.count} 张照片${watermark ? '，带水印' : ''}）`
       + (pubDirPicked ? ' · 以后点发布就直接写，不会再弹框' : ''),
-      { label: '看看访客页', fn: openVisitorPage, ms: 10000 });
+      { label: '打开访客页', fn: openVisitorPage, ms: 14000 });
     return;
   } catch (e) {
     console.warn('写入文件夹失败，改成下载 zip', e);
@@ -1948,7 +1971,8 @@ async function publishSite(watermark) {
     const next = dropDir
       ? '下次点发布会让你重新选一次项目文件夹（选当前的项目目录即可）'
       : '再发布一次时，在面板里点「换个文件夹」重新授权就好';
-    toast(`${writeFailText(e)}，已改成下载发布包。${next}`, { ms: 9000 });
+    toast(`${writeFailText(e)}，已改成下载发布包。${next}`,
+      { label: '打开访客页', fn: openVisitorPage, ms: 12000 });
   }
 }
 
@@ -1959,7 +1983,9 @@ async function publishSiteAsZip(watermark, why) {
   catch (e) { console.error(e); return toast('发布失败：' + e.message); }
   if (!built) return toast('没有可发布的照片（示例照片不会发布）');
   downloadSiteZip(built.files);
-  toast(`${why}，已改成下载发布包（解压到项目根目录，${built.count} 张照片${watermark ? '，已加水印' : ''}）`, { ms: 7000 });
+  toast(`${why}，已改成下载发布包（${built.count} 张照片${watermark ? '，已加水印' : ''}）。`
+    + '解压到项目根目录后，点右上角「打开访客页」就能看',
+    { label: '打开访客页', fn: openVisitorPage, ms: 12000 });
 }
 
 /* ---------- 发布面板 ---------- */
@@ -2029,6 +2055,7 @@ async function refreshPubDirHint() {
 }
 
 $('publishBtn').addEventListener('click', openPublishModal);
+$('openSiteBtn').addEventListener('click', openVisitorPage);
 $('pubCancel').addEventListener('click', closePublishModal);
 $('publishModal').addEventListener('click', (e) => { if (e.target === $('publishModal')) closePublishModal(); });
 $('pubWatermark').addEventListener('change', () => {
