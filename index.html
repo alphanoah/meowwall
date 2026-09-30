@@ -115,14 +115,10 @@
           <button type="button" data-mode="grid">几 × 几 铺满</button>
         </div>
       </div>
-      <label class="ctl" id="densityCtl">
+      <label class="ctl" id="densityCtl" title="只在「几 × 几 铺满」模式下起作用">
         <span>照片块数<em id="densityVal">10 × 9</em></span>
         <input type="range" id="density" min="5" max="22" value="10">
       </label>
-      <p class="suggest" id="suggestHint" hidden>
-        <span id="suggestTxt"></span>
-        <button class="btn-soft" id="suggestApply" type="button"></button>
-      </p>
       <label class="ctl">
         <span>间隙<em id="gapVal">3</em></span>
         <input type="range" id="gap" min="0" max="12" value="3">
@@ -131,10 +127,16 @@
         <input type="checkbox" id="whiskers" checked>
         <span>轮廓 + 胡须</span>
       </label>
-      <label class="ctl switch" id="bgFrameCtl" hidden title="关掉就用原来的猫头轮廓">
+      <label class="ctl switch off" id="bgFrameCtl" title="关掉就用原来的猫头轮廓">
         <input type="checkbox" id="bgFrame" checked>
         <span>木牌相框底图</span>
       </label>
+      <!-- 建议值提示必须排在所有控件之后：它是 flex-basis:100% 的整行，
+           放在中间会把后面的控件全挤到下一行 -->
+      <p class="suggest" id="suggestHint">
+        <span id="suggestTxt"></span>
+        <button class="btn-soft" id="suggestApply" type="button" hidden></button>
+      </p>
     </div>
 
     <p class="layout-note" id="layoutNote">上传照片后，会按张数自动均分猫头</p>

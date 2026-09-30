@@ -93,11 +93,12 @@ function setBgFrame(on) {
   renderMosaic();
 }
 
-/* 图没加载出来（或自测页强制猫头）就没有可切的东西：藏掉这个勾选。 */
+/* 图没加载出来（或自测页强制猫头）就没什么可切的：
+   占住位置但不显示（不用 hidden，避免控制区重排）。 */
 function syncBgFrameCtl() {
   const ctl = $('bgFrameCtl');
   if (!ctl) return;
-  ctl.hidden = !bgLoaded;
+  ctl.classList.toggle('off', !bgLoaded);
   const box = $('bgFrame');
   if (box) box.checked = useBgFrame;
 }
@@ -1200,33 +1201,41 @@ function suggestCols(n) {
   return 22;
 }
 
-// 滑块旁的建议提示：只提示不强制，点按钮才应用
+/* 滑块旁的建议提示：这行永远在场（没有建议时用一句灰字说明占位），
+   保证控制区高度不变、切换排列方式时不重排。 */
 function renderSuggest(n, cols) {
   const el = $('suggestHint');
   const btn = $('suggestApply');
-  if (layoutMode !== 'grid' || !n) { el.hidden = true; return; }
+  const txt = $('suggestTxt');
+  // 静默一行：不抢眼、不给按钮
+  const idle = (s) => { el.classList.add('is-idle'); btn.hidden = true; txt.textContent = s; };
+
+  if (layoutMode !== 'grid') { idle('「几 × 几 铺满」模式下，这里会提示更合适的照片块数'); return; }
+  if (!n) { idle('上传照片后，这里会提示更合适的照片块数'); return; }
+
   const curMain = mainCellsOf(cols);
   const sug = suggestCols(n);
-  if (sug === cols) { el.hidden = true; return; }   // 当前档位已是最优
+  if (sug === cols) { idle('当前档位就是建议值，每张照片都能放进完整格'); return; }
+
+  el.classList.remove('is-idle');
   const sugRows = gridRowsOf(sug);
   const sugMain = mainCellsOf(sug);
-  el.hidden = false;
   if (curMain < n) {
     // 完整格不够：要么给建议，要么已到上限
     if (sugMain < n) {
       btn.hidden = true;
-      $('suggestTxt').textContent =
+      txt.textContent =
         `当前 ${cols} × ${gridRowsOf(cols)} 只有 ${curMain} 个完整格，放不下 ${n} 张；已到上限 22 × ${gridRowsOf(22)}（${sugMain} 个完整格），多出的只能进边缘`;
     } else {
       btn.hidden = false;
-      $('suggestTxt').textContent =
+      txt.textContent =
         `当前 ${cols} × ${gridRowsOf(cols)} 只有 ${curMain} 个完整格，放不下 ${n} 张`;
       btn.textContent = `用建议值 ${sug} × ${sugRows}（${sugMain} 个完整格）`;
     }
   } else {
     // 完整格够但列数偏多：用更少的列格子更大
     btn.hidden = false;
-    $('suggestTxt').textContent = `${n} 张照片用更少的列就能全部完整展示，每格更大`;
+    txt.textContent = `${n} 张照片用更少的列就能全部完整展示，每格更大`;
     btn.textContent = `用建议值 ${sug} × ${sugRows}（${sugMain} 个完整格）`;
   }
 }
@@ -2625,8 +2634,12 @@ $('modeSeg').addEventListener('click', (e) => {
   renderMosaic();
 });
 
+/* 排列方式切换只改「照片块数」的可用状态，不动它的位置：
+   控制区里每一项都常驻，避免切换时其他控件换行跳动。 */
 function syncMode() {
-  $('densityCtl').style.display = layoutMode === 'grid' ? '' : 'none';
+  const on = layoutMode === 'grid';
+  $('densityCtl').classList.toggle('is-idle', !on);
+  $('density').disabled = !on;
 }
 
 $('clearAll').addEventListener('click', async () => {

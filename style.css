@@ -369,11 +369,13 @@ body.moving{overflow:hidden;}
 }
 #mosaic{width:100%;max-width:760px;height:auto;display:block;border-radius:10px;}
 
+/* 控制区：所有控件永远在场（不适用的置灰、未就绪的占位隐藏），
+   这样布局只跟窗口宽度有关，切换排列方式 / 勾选项时不会重排、不会换行跳动。 */
 .controls{
-  display:flex;align-items:center;gap:22px;flex-wrap:wrap;
+  display:flex;align-items:center;gap:16px 18px;flex-wrap:wrap;
   margin-top:16px;padding:12px 14px;background:#FFFDFA;border:1px solid var(--line);border-radius:13px;
 }
-.ctl{display:flex;flex-direction:column;gap:5px;min-width:180px;font-size:12px;color:var(--ink-2);}
+.ctl{display:flex;flex-direction:column;gap:5px;min-width:170px;font-size:12px;color:var(--ink-2);}
 .ctl span{display:flex;justify-content:space-between;gap:10px;}
 .ctl em{font-style:normal;color:var(--accent-d);font-weight:600;}
 .ctl input[type=range]{
@@ -383,16 +385,19 @@ body.moving{overflow:hidden;}
   -webkit-appearance:none;width:16px;height:16px;border-radius:50%;
   background:var(--accent);border:2.5px solid #fff;box-shadow:0 2px 6px rgba(200,130,70,.45);cursor:pointer;
 }
-.ctl.switch{flex-direction:row;align-items:center;gap:8px;min-width:120px;font-size:12.5px;color:var(--ink);}
+.ctl.switch{flex-direction:row;align-items:center;gap:8px;min-width:112px;font-size:12.5px;color:var(--ink);}
 .ctl.switch input{width:16px;height:16px;accent-color:var(--accent);}
-.ctl[hidden]{display:none;}   /* .ctl/.switch 是 flex，不写这条 hidden 属性会失效 */
+.ctl.is-idle{opacity:.45;}                 /* 当前排列方式用不到：留在原位、置灰 */
+.ctl.is-idle input{pointer-events:none;}
+.ctl.off{visibility:hidden;}               /* 相框底图没加载出来：占着位置但不显示 */
 
 .suggest{
-  flex-basis:100%;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-  margin:0;font-size:12px;color:#B0682F;
+  flex-basis:100%;display:flex;align-items:center;gap:10px;
+  margin:0;font-size:12px;color:#B0682F;min-height:42px;
 }
-.suggest[hidden]{display:none;}
-.suggest .btn-soft{padding:4px 12px;font-size:12px;white-space:nowrap;}
+.suggest.is-idle{color:var(--ink-2);}      /* 没有建议可给时只是静默说明，不抢眼 */
+#suggestTxt{flex:1 1 auto;min-width:0;}
+.suggest .btn-soft{padding:4px 12px;font-size:12px;white-space:nowrap;flex:none;}
 
 .ctl.seg{min-width:238px;}
 .seg-btns{display:flex;gap:3px;background:#F5EBDF;border-radius:11px;padding:3px;}
@@ -406,6 +411,7 @@ body.moving{overflow:hidden;}
 .layout-note{
   margin:10px 0 0;font-size:12px;color:var(--accent-d);font-weight:600;
   background:var(--accent-soft);border-radius:10px;padding:7px 12px;
+  min-height:52px;display:flex;align-items:center;   /* 恒定两行高：文字长短变化不再推挤下方按钮 */
 }
 
 .actions{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;}
