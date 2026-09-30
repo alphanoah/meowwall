@@ -10,6 +10,7 @@
 
 ## 技术约定
 - 纯前端零依赖：`index.html` + `style.css` + `app.js`，无构建步骤。
+- 拼贴底图（2026-09-30 起）：「木牌猫相框」背景图（`cat-bg.png`，中间圆洞放照片格子），真源 = app.js 的 `BG_MAP`/`BG_HOLE`（洞几何由图实测）+ `BG_CLIP_R`。**换背景图必须重新实测洞几何并复测主体格数**（testenv/measure-cells.js 可出数）。图加载失败自动退回猫头画法；工作台「木牌相框底图」勾选可来回切（localStorage `catsmap.bgFrame`，默认开），`?nobg` / `window.CAT_BG_DISABLE` 强制猫头（自测页 test-mainfirst 的 iframe 用，其基准表按猫头固化，勾选在这两种情况下自动隐藏）。顶栏 logo 仍是旧猫头（index.html 内联 SVG，不共用）。
 - 本地预览：`cd /Users/alpha/Theo/meowwall && /Users/alpha/.workbuddy/binaries/python/versions/3.13.12/bin/python3 -m http.server 8848`
   - **固定用 8848 端口**：照片存在浏览器 IndexedDB，数据绑定「源地址」（host:port，与项目路径无关），换端口 = 换一个空库；项目换文件夹不影响数据。
 - 照片存储：IndexedDB 库 `catsmap` / 表 `photos`（主键 id，字段 name/date/place/note/blob/thumb/w/h/createdAt/crop）。
