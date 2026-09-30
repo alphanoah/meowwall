@@ -5,7 +5,11 @@
 - 仓库：`/Users/alpha/Theo/meowwall`（2026-09-28 从 `/Users/alpha/Downloads/catsmap` 整体移动过来，GitHub 远端与提交历史不变），分支 `main`，首次提交 `80a9593`。
 - 提交前先 `node --check app.js` 确认语法无误；改动涉及渲染/界面时，先截图自测再提交。
 - 一次改动 = 一个提交，不把多个不相关改动混在一起。
-- 推送约定（2026-09-28 起更新）：remote = `https://github.com/alphanoah/meowwall.git`，Pages 线上地址 `https://alphanoah.github.io/meowwall/`（Source = main /docs）。**push 现在 AI 可以直接推**（实测 `git push origin main` 成功，233 个提交一次推完；此前记录的「沙盒代理到 github.com 一律 502」已过时）。commit 照旧自动做，用户开口时直接 push。
+- 推送约定（2026-09-30 更新）：Pages 线上地址 `https://alphanoah.github.io/meowwall/`（Source = main /docs，推送后约 1 分钟内部署完）。仓库地址 `https://github.com/alphanoah/meowwall.git`。
+  - **网络通道（按优先级试）**：① `git push git@github.com:alphanoah/meowwall.git main` —— SSH 22 端口直连**实测可用**（`ssh -T git@github.com` 返回 `Hi alphanoah!`，key = `~/.ssh/id_ed25519`），这是当前最稳的通道；② HTTPS 直连 github.com:443 会被墙（75s 超时）；③ 沙盒代理 `127.0.0.1:53061`（env 里的 HTTP_PROXY）访问 github 是**时通时断**（多次重试偶尔 200、多为 502），当兜底。
+  - 用 URL 直推不会更新 `origin/main` 本地跟踪引用（`git status` 会一直显示 ahead），推完用 `git update-ref refs/remotes/origin/main <sha>` 同步。
+  - `origin` 的 URL 仍是 HTTPS（不通）；**远程配置不要擅自改，换通道用一次性 URL 推即可**。
+- **commit 照旧自动做**，用户开口时直接 push（默认优先走 SSH 通道）。
 - 提交信息结尾注明「已验证」的方式（如 headless 截图 / node 校验）。
 
 ## 技术约定
