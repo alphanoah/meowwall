@@ -2,7 +2,7 @@
   "app": "catsmap",
   "type": "site",
   "version": 1,
-  "updatedAt": "2026-09-28T08:52:22.777Z",
+  "updatedAt": "2026-09-30T08:20:28.978Z",
   "count": 52,
   "cats": 45,
   "mosaic": "meowtonians/拼贴-大猫头.png",
@@ -13,6 +13,7 @@
     "target": 100,
     "year": 2026
   },
+  "bgFrame": true,
   "photos": [
     {
       "file": "meowtonians/27-合照.jpg",
